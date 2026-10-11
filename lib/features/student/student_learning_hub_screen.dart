@@ -618,6 +618,14 @@ class _StudentLearningHubScreenState
       'report'
     ])) {
       _openProgress();
+    } else if (has([
+      'sign out',
+      'log out',
+      'logout',
+      'switch student',
+      'change student'
+    ])) {
+      unawaited(_signOutAndLeave());
     } else if (has(['home', 'main menu', 'go home'])) {
       // NOTE: the word "subjects" is deliberately NOT a trigger here — it
       // appears in the subjects announcement ("You have two subjects…"), and
@@ -2237,6 +2245,8 @@ class _StudentLearningHubScreenState
                         const SizedBox(width: 8),
                         _buildJoinClassButton(),
                         const SizedBox(width: 8),
+                        _buildSignOutButton(),
+                        const SizedBox(width: 8),
                         _stageChip(),
                       ],
                     ),
@@ -2320,6 +2330,7 @@ class _StudentLearningHubScreenState
   /// (different student, or the teacher needs the app) still reachable.
   Future<void> _signOutAndLeave() async {
     _voiceLoopSession++;
+    unawaited(_endVoiceSession());
     try {
       await ref.read(sttServiceProvider).stopListening();
       await ref.read(ttsServiceProvider).stop();
@@ -2417,6 +2428,8 @@ class _StudentLearningHubScreenState
     // Available from anywhere.
     add('My progress', 'Hear how much you have completed',
         Icons.insights_rounded, _openProgress);
+    add('Sign out', 'Return to student login and choose a different student',
+      Icons.logout_rounded, () => unawaited(_signOutAndLeave()));
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
@@ -2480,6 +2493,33 @@ class _StudentLearningHubScreenState
               Icons.group_add_rounded,
               color: Color(0xFF1A56DB),
               size: 22,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSignOutButton() {
+    return Semantics(
+      button: true,
+      label: 'Sign out',
+      hint: 'Return to student login and choose a different student',
+      child: Tooltip(
+        message: 'Sign out',
+        child: Material(
+          color: const Color(0xFFDC2626).withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () => unawaited(_signOutAndLeave()),
+            child: const Padding(
+              padding: EdgeInsets.all(10),
+              child: Icon(
+                Icons.logout_rounded,
+                color: Color(0xFFDC2626),
+                size: 22,
+              ),
             ),
           ),
         ),

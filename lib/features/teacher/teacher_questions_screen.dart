@@ -38,7 +38,7 @@ class _TeacherQuestionsScreenState
   Future<void> _loadQuestions() async {
     final id = int.parse(widget.lessonId);
     final db = ref.read(appDatabaseProvider);
-    final q = await db.questionDao.getQuestionsByLessonId(id);
+    final q = await db.questionDao.getAllQuestionsByLessonId(id);
     if (!mounted) return;
     setState(() {
       _questions = q;
@@ -110,6 +110,7 @@ class _TeacherQuestionsScreenState
 
   Widget _buildQuestionCard(Question q, int i) {
     final isTeacher = q.source == 'teacher';
+    final isPending = q.source == 'ai_pending';
     final badgeColor =
         isTeacher ? const Color(0xFF16A34A) : const Color(0xFF1A56DB);
 
@@ -145,7 +146,9 @@ class _TeacherQuestionsScreenState
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
-                isTeacher ? 'Teacher' : 'AI',
+                isPending
+                    ? 'Pending review'
+                    : (isTeacher ? 'Teacher' : 'Cloud'),
                 style: TextStyle(
                   fontSize: 11,
                   color: badgeColor,
@@ -185,6 +188,17 @@ class _TeacherQuestionsScreenState
                 // ── Edit / delete buttons ──────────────────────────────
                 Row(
                   children: [
+                    if (isPending) ...[
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          icon:
+                              const Icon(Icons.check_circle_outline, size: 16),
+                          label: const Text('Approve'),
+                          onPressed: () => _approveQuestion(q),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                     Expanded(
                       child: OutlinedButton.icon(
                         icon: const Icon(Icons.edit_outlined, size: 16),
@@ -218,6 +232,15 @@ class _TeacherQuestionsScreenState
         ],
       ),
     );
+  }
+
+  Future<void> _approveQuestion(Question q) async {
+    final db = ref.read(appDatabaseProvider);
+    await db.questionDao.updateQuestion(
+      q.id,
+      const QuestionsTableCompanion(source: Value('teacher')),
+    );
+    await _loadQuestions();
   }
 
   // ── "Add New Question" card ────────────────────────────────────────────────
@@ -500,13 +523,17 @@ class _TeacherQuestionsScreenState
         },
       ),
     ).then((_) {
-      // Dispose controllers once the dialog is fully closed.
-      qCtrl.dispose();
-      aCtrl.dispose();
-      bCtrl.dispose();
-      cCtrl.dispose();
-      dCtrl.dispose();
-      exCtrl.dispose();
+      // showDialog completes when pop starts the route's reverse animation.
+      // Wait for that animation to finish before disposing controllers that
+      // are still read by the outgoing TextFields.
+      Future<void>.delayed(const Duration(milliseconds: 300), () {
+        qCtrl.dispose();
+        aCtrl.dispose();
+        bCtrl.dispose();
+        cCtrl.dispose();
+        dCtrl.dispose();
+        exCtrl.dispose();
+      });
     });
   }
 
@@ -689,12 +716,14 @@ class _TeacherQuestionsScreenState
       ),
     ).then((_) {
       // Dispose controllers once the dialog is fully closed.
-      qCtrl.dispose();
-      aCtrl.dispose();
-      bCtrl.dispose();
-      cCtrl.dispose();
-      dCtrl.dispose();
-      exCtrl.dispose();
+      Future<void>.delayed(const Duration(milliseconds: 300), () {
+        qCtrl.dispose();
+        aCtrl.dispose();
+        bCtrl.dispose();
+        cCtrl.dispose();
+        dCtrl.dispose();
+        exCtrl.dispose();
+      });
     });
   }
 

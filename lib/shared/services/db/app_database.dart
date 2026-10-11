@@ -377,6 +377,15 @@ class QuestionDao extends DatabaseAccessor<AppDatabase>
   Future<List<Question>> getQuestionsByLessonId(int lessonId) =>
       (select(questionsTable)
             ..where((t) => t.lessonId.equals(lessonId))
+            // Only explicitly approved sources are student-visible. This
+            // keeps older `ai` rows safe as well as new `ai_pending` rows.
+            ..where((t) => t.source.isIn(['teacher', 'cloud']))
+            ..orderBy([(t) => OrderingTerm.asc(t.positionInLesson)]))
+          .get();
+
+  Future<List<Question>> getAllQuestionsByLessonId(int lessonId) =>
+      (select(questionsTable)
+            ..where((t) => t.lessonId.equals(lessonId))
             ..orderBy([(t) => OrderingTerm.asc(t.positionInLesson)]))
           .get();
 
@@ -394,6 +403,9 @@ class QuestionDao extends DatabaseAccessor<AppDatabase>
   /// Delete the question with the given [id] and return the number of rows deleted.
   Future<int> deleteQuestion(int id) =>
       (delete(questionsTable)..where((t) => t.id.equals(id))).go();
+
+  Future<int> deleteQuestionsByLessonId(int lessonId) =>
+      (delete(questionsTable)..where((t) => t.lessonId.equals(lessonId))).go();
 }
 
 // ------------------------------------------------------------------

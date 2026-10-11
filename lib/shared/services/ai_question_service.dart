@@ -87,56 +87,207 @@ class AiQuestionService {
       r'^(.{3,60}?)\s(is|are)\s(.{3,80}?)\s(?:if|when)\s(.{5,90})$',
       caseSensitive: false);
 
-  static const List<String> _linkingVerbs = [' is ', ' are ', ' was ', ' were '];
+  static const List<String> _linkingVerbs = [
+    ' is ',
+    ' are ',
+    ' was ',
+    ' were '
+  ];
 
   static const Set<String> _pronounSubjects = {
-    'it', 'this', 'that', 'these', 'those', 'they', 'there',
-    'he', 'she', 'we', 'you', 'i', 'here', 'its', 'their',
-    'his', 'her', 'such', 'one', 'some', 'many', 'most',
+    'it',
+    'this',
+    'that',
+    'these',
+    'those',
+    'they',
+    'there',
+    'he',
+    'she',
+    'we',
+    'you',
+    'i',
+    'here',
+    'its',
+    'their',
+    'his',
+    'her',
+    'such',
+    'one',
+    'some',
+    'many',
+    'most',
   };
 
   // Question words / conjunctions that must never be a definition subject --
   // otherwise a question or heading like "Why is food important?" becomes the
   // nonsense question "What is Why?".
   static const Set<String> _interrogatives = {
-    'why', 'what', 'how', 'when', 'where', 'who', 'whom', 'whose',
-    'which', 'whether', 'if', 'because', 'although', 'though',
+    'why',
+    'what',
+    'how',
+    'when',
+    'where',
+    'who',
+    'whom',
+    'whose',
+    'which',
+    'whether',
+    'if',
+    'because',
+    'although',
+    'though',
   };
 
   // Subordinators / participles / discourse words that begin a clause, not a
   // thing being defined. "Since 6 is 5 or more, round up" must never become
   // "What is Since 6?".
   static const Set<String> _clauseLeadIns = {
-    'since', 'while', 'after', 'before', 'unless', 'until', 'during',
-    'once', 'following', 'using', 'according', 'considering', 'given',
-    'then', 'also', 'therefore', 'thus', 'hence', 'so', 'first', 'second',
-    'next', 'finally', 'note', 'remember', 'example', 'answer',
+    'since',
+    'while',
+    'after',
+    'before',
+    'unless',
+    'until',
+    'during',
+    'once',
+    'following',
+    'using',
+    'according',
+    'considering',
+    'given',
+    'then',
+    'also',
+    'therefore',
+    'thus',
+    'hence',
+    'so',
+    'first',
+    'second',
+    'next',
+    'finally',
+    'note',
+    'remember',
+    'example',
+    'answer',
   };
 
   // Imperative openers of worked examples and activities ("Write 35,000 in
   // words.", "Round 89,365 to the nearest 100."). Instructions to the reader
   // are not teachable statements — they make nonsense questions and clozes.
   static const Set<String> _imperativeStarts = {
-    'write', 'work', 'round', 'find', 'use', 'complete', 'test', 'check',
-    'add', 'subtract', 'multiply', 'divide', 'arrange', 'look', 'break',
-    'read', 'solve', 'calculate', 'draw', 'list', 'name', 'state', 'fill',
-    'copy', 'answer', 'practice', 'practise', 'keep',
+    'write',
+    'work',
+    'round',
+    'find',
+    'use',
+    'complete',
+    'test',
+    'check',
+    'add',
+    'subtract',
+    'multiply',
+    'divide',
+    'arrange',
+    'look',
+    'break',
+    'read',
+    'solve',
+    'calculate',
+    'draw',
+    'list',
+    'name',
+    'state',
+    'fill',
+    'copy',
+    'answer',
+    'practice',
+    'practise',
+    'keep',
   };
 
   static const Set<String> _stopwords = {
-    'the', 'a', 'an', 'and', 'or', 'but', 'of', 'to', 'in', 'on', 'at',
-    'for', 'with', 'as', 'by', 'from', 'is', 'are', 'was', 'were', 'be',
-    'been', 'being', 'it', 'its', 'this', 'that', 'these', 'those', 'they',
-    'them', 'their', 'there', 'here', 'about', 'into', 'over', 'between',
-    'which', 'who', 'what', 'when', 'where', 'why', 'how', 'than', 'then',
-    'have', 'has', 'had', 'does', 'will', 'would', 'should', 'could',
-    'you', 'your', 'we', 'our', 'he', 'she', 'must', 'may', 'can',
+    'the',
+    'a',
+    'an',
+    'and',
+    'or',
+    'but',
+    'of',
+    'to',
+    'in',
+    'on',
+    'at',
+    'for',
+    'with',
+    'as',
+    'by',
+    'from',
+    'is',
+    'are',
+    'was',
+    'were',
+    'be',
+    'been',
+    'being',
+    'it',
+    'its',
+    'this',
+    'that',
+    'these',
+    'those',
+    'they',
+    'them',
+    'their',
+    'there',
+    'here',
+    'about',
+    'into',
+    'over',
+    'between',
+    'which',
+    'who',
+    'what',
+    'when',
+    'where',
+    'why',
+    'how',
+    'than',
+    'then',
+    'have',
+    'has',
+    'had',
+    'does',
+    'will',
+    'would',
+    'should',
+    'could',
+    'you',
+    'your',
+    'we',
+    'our',
+    'he',
+    'she',
+    'must',
+    'may',
+    'can',
   };
 
   // Quantity words that make poor cloze answers/distractors on their own.
   static const Set<String> _numberWords = {
-    'hundred', 'thousand', 'million', 'billion', 'dozen', 'twenty',
-    'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety',
+    'hundred',
+    'thousand',
+    'million',
+    'billion',
+    'dozen',
+    'twenty',
+    'thirty',
+    'forty',
+    'fifty',
+    'sixty',
+    'seventy',
+    'eighty',
+    'ninety',
   };
 
   /// Generates MCQs from [lessonText] — between [_minQuestions] and
@@ -158,7 +309,10 @@ class AiQuestionService {
     final candidates = <_Candidate>[];
     for (var i = 0; i < scanned.length; i++) {
       final s = scanned[i].text;
-      final q = _definitionMcq(s, sentences, rng) ?? _ruleMcq(s, sentences, rng);
+      final q = _explainWhyMcq(s, sentences, rng) ??
+          _invertedDefinitionMcq(s, sentences, rng) ??
+          _definitionMcq(s, sentences, rng) ??
+          _ruleMcq(s, sentences, rng);
       if (q != null) {
         candidates.add(_Candidate(i, scanned[i].section, q, _subjectHead(q)));
       }
@@ -207,8 +361,9 @@ class AiQuestionService {
   /// The head noun of a generated question's subject, used to stop a quiz
   /// asking five variations of the same thing.
   String _subjectHead(AiGeneratedQuestion q) {
-    final m = RegExp(r'^(?:What|When) (?:is|are) (.+?)\??$', caseSensitive: false)
-        .firstMatch(q.questionText);
+    final m =
+        RegExp(r'^(?:What|When) (?:is|are) (.+?)\??$', caseSensitive: false)
+            .firstMatch(q.questionText);
     if (m == null) return '';
     final words = m
         .group(1)!
@@ -358,6 +513,119 @@ class AiQuestionService {
     );
   }
 
+  AiGeneratedQuestion? _explainWhyMcq(
+      String sentence, List<String> all, Random rng) {
+    final m = RegExp(
+      r'^Explain why (.+?)\s+is\s+(.+)$',
+      caseSensitive: false,
+    ).firstMatch(_stripTrailingDot(sentence));
+    if (m == null) return null;
+
+    final subject = m.group(1)!.trim();
+    final predicate = m.group(2)!.trim();
+    if (subject.isEmpty || predicate.isEmpty) return null;
+    final than =
+        RegExp(r'\bthan\s+(.+)$', caseSensitive: false).firstMatch(predicate);
+    if (than == null) return null;
+    final comparisonTarget = than.group(1)!.trim();
+
+    // Activity prompts are often followed by the supporting fact elsewhere in
+    // the note. Use that fact to make an answerable, explanatory MCQ.
+    final supporting = all.firstWhere(
+      (s) =>
+          s != sentence &&
+          s.toLowerCase().contains(subject.toLowerCase()) &&
+          s.toLowerCase().contains('altitude') &&
+          s.toLowerCase().contains('colder'),
+      orElse: () => '',
+    );
+    if (supporting.isEmpty) return null;
+
+    final correct =
+        'Because $subject is at a higher altitude than $comparisonTarget';
+    final distractors = _pickLengthMatched(
+      correct,
+      [
+        'Because $subject receives more sunshine than $comparisonTarget',
+        'Because $subject is closer to sea level than $comparisonTarget',
+        'Because $comparisonTarget is located on a mountain',
+      ],
+      3,
+      rng,
+    );
+    return _assemble(
+      questionText: 'Explain why $subject is $predicate?',
+      correct: correct,
+      wrongs: distractors,
+      explanation: 'From your lesson: $supporting',
+      rng: rng,
+    );
+  }
+
+  AiGeneratedQuestion? _invertedDefinitionMcq(
+      String sentence, List<String> all, Random rng) {
+    String? verb;
+    for (final v in _linkingVerbs) {
+      if (sentence.contains(v)) {
+        verb = v;
+        break;
+      }
+    }
+    if (verb == null || sentence.trim().endsWith('?')) return null;
+
+    final idx = sentence.indexOf(verb);
+    final subject = sentence.substring(0, idx).trim();
+    final predicate = _stripTrailingDot(
+      sentence.substring(idx + verb.length),
+    ).trim();
+    final lower = predicate.toLowerCase();
+    final isSuperlative = lower.startsWith('the ') &&
+        RegExp(r'\b(highest|largest|longest|deepest|oldest)\b').hasMatch(lower);
+    final isNamedFeature = lower.startsWith('an extinct volcano') ||
+        lower.startsWith('a rift valley lake');
+    if ((!isSuperlative && !isNamedFeature) ||
+        subject.isEmpty ||
+        subject.contains(':')) {
+      return null;
+    }
+
+    final otherSubjects = <String>[];
+    for (final other in all) {
+      if (other == sentence) continue;
+      for (final otherVerb in _linkingVerbs) {
+        final otherIndex = other.indexOf(otherVerb);
+        if (otherIndex <= 0) continue;
+        final candidate = other.substring(0, otherIndex).trim();
+        if (candidate.isNotEmpty &&
+            !candidate.contains(':') &&
+            candidate.split(_whitespace).length <= 6) {
+          otherSubjects.add(candidate);
+        }
+        break;
+      }
+    }
+    final correct = _questionSubject(subject);
+    final distractors =
+        _pickLengthMatched(correct, _dedupe(otherSubjects), 3, rng);
+    if (distractors.length < 3) return null;
+
+    final featurePhrase = predicate
+        .replaceFirst(RegExp(r'^an?\s+', caseSensitive: false), '')
+        .replaceFirst(RegExp(r'\s+that is\s+', caseSensitive: false), ' ');
+    final questionText = isNamedFeature
+        ? 'Which $featurePhrase?'
+        : (lower.contains('mountain')
+            ? 'Which is $predicate?'
+            : 'What is $predicate?');
+    return _assemble(
+      questionText: questionText,
+      correct: correct,
+      wrongs: distractors,
+      explanation: 'From your lesson: ${_truncate(sentence, 200)}',
+      rng: rng,
+    );
+  }
+
   AiGeneratedQuestion? _definitionMcq(
       String sentence, List<String> all, Random rng) {
     String? verb;
@@ -410,20 +678,43 @@ class AiQuestionService {
     });
     if (!hasContentWord) return null;
 
-    final correct = _shortPhrase(rawPredicate, 12);
+    final passiveTarget = RegExp(
+      r'^immunised against\s+(.+)$',
+      caseSensitive: false,
+    ).firstMatch(rawPredicate);
+    final correct = _definitionPhrase(
+      passiveTarget?.group(1) ?? rawPredicate,
+    );
     if (!_isSpeakableOption(correct)) return null;
 
     final distractors =
         _pickLengthMatched(correct, _predicatePool(sentence, all), 3, rng);
     if (distractors.length < 3) return null;
 
+    final questionText = passiveTarget == null
+        ? 'What ${verb.trim()} '
+            '${_questionSubject(_shortPhrase(subject, 8))}?'
+        : 'What are ${_questionSubject(_shortPhrase(subject, 8))} '
+            'immunised against?';
     return _assemble(
-      questionText: 'What ${verb.trim()} ${_shortPhrase(subject, 8)}?',
+      questionText: questionText,
       correct: correct,
       wrongs: distractors,
       explanation: 'From your lesson: ${_truncate(sentence, 200)}',
       rng: rng,
     );
+  }
+
+  String _questionSubject(String subject) {
+    if (subject.isEmpty) return subject;
+    return subject[0].toLowerCase() + subject.substring(1);
+  }
+
+  String _definitionPhrase(String text) {
+    final t = _stripTrailingDot(text).trim();
+    final words = t.split(_whitespace);
+    if (words.length <= 12) return _balanceParens(t);
+    return _shortPhrase(t, 12);
   }
 
   /// Distractor candidates: cleaned predicates of the OTHER sentences.
@@ -466,7 +757,8 @@ class AiQuestionService {
     final answer = present.first;
 
     final blanked = sentence.replaceFirst(
-        RegExp('\\b${RegExp.escape(answer)}\\b', caseSensitive: false), 'blank');
+        RegExp('\\b${RegExp.escape(answer)}\\b', caseSensitive: false),
+        'blank');
     if (!blanked.toLowerCase().contains('blank')) return null;
 
     final others =
@@ -488,8 +780,7 @@ class AiQuestionService {
   List<String> _keyTerms(List<String> sentences) {
     final terms = <String>[];
     final seen = <String>{};
-    final capSeq =
-        RegExp(r'\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\b');
+    final capSeq = RegExp(r'\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\b');
 
     bool usable(String lowerKey) =>
         !_stopwords.contains(lowerKey) &&
@@ -528,9 +819,17 @@ class AiQuestionService {
   }
 
   static const List<String> _clauseBreaks = [
-    '; ', ' which ', ' that ', ' where ',
-    ' because ', ' so that ', ' in order ', ' such as ',
-    ' if ', ' when ', ' unless ',
+    '; ',
+    ' which ',
+    ' that ',
+    ' where ',
+    ' because ',
+    ' so that ',
+    ' in order ',
+    ' such as ',
+    ' if ',
+    ' when ',
+    ' unless ',
   ];
 
   String _shortPhrase(String text, int maxWords) {

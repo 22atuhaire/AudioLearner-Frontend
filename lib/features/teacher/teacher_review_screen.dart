@@ -160,9 +160,15 @@ class _TeacherReviewScreenState extends ConsumerState<TeacherReviewScreen> {
                 for (var i = 0; i < optControllers.length; i++)
                   Row(
                     children: [
+                      // Keep the legacy API for the app's current Flutter
+                      // compatibility range; the replacement requires a
+                      // newer RadioGroup-only widget structure.
+                      // ignore: deprecated_member_use
                       Radio<int>(
                         value: i,
+                        // ignore: deprecated_member_use
                         groupValue: correctIndex,
+                        // ignore: deprecated_member_use
                         onChanged: (v) => setLocal(() => correctIndex = v ?? 0),
                       ),
                       Expanded(
@@ -177,8 +183,7 @@ class _TeacherReviewScreenState extends ConsumerState<TeacherReviewScreen> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: expController,
-                  decoration:
-                      const InputDecoration(labelText: 'Explanation'),
+                  decoration: const InputDecoration(labelText: 'Explanation'),
                   maxLines: null,
                 ),
               ],
@@ -196,12 +201,21 @@ class _TeacherReviewScreenState extends ConsumerState<TeacherReviewScreen> {
       ),
     );
 
-    if (saved != true) return;
+    if (saved != true) {
+      Future<void>.delayed(const Duration(milliseconds: 300), () {
+        qController.dispose();
+        expController.dispose();
+        for (final controller in optControllers) {
+          controller.dispose();
+        }
+      });
+      return;
+    }
 
     final newOptions = <ReviewOption>[];
     for (var i = 0; i < optControllers.length; i++) {
-      newOptions.add(
-          ReviewOption(text: optControllers[i].text, isCorrect: i == correctIndex));
+      newOptions.add(ReviewOption(
+          text: optControllers[i].text, isCorrect: i == correctIndex));
     }
     try {
       await _service.updateQuestion(
@@ -219,6 +233,14 @@ class _TeacherReviewScreenState extends ConsumerState<TeacherReviewScreen> {
       });
     } catch (e) {
       _snack(e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      Future<void>.delayed(const Duration(milliseconds: 300), () {
+        qController.dispose();
+        expController.dispose();
+        for (final controller in optControllers) {
+          controller.dispose();
+        }
+      });
     }
   }
 
@@ -286,8 +308,9 @@ class _TeacherReviewScreenState extends ConsumerState<TeacherReviewScreen> {
                 ),
                 Chip(
                   label: Text(q.approved ? 'Approved' : 'Pending'),
-                  backgroundColor:
-                      q.approved ? Colors.green.shade100 : Colors.orange.shade100,
+                  backgroundColor: q.approved
+                      ? Colors.green.shade100
+                      : Colors.orange.shade100,
                 ),
               ],
             ),

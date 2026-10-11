@@ -348,7 +348,8 @@ class _TeacherUploadScreenState extends ConsumerState<TeacherUploadScreen> {
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF1A56DB),
           foregroundColor: Colors.white,
-          disabledBackgroundColor: const Color(0xFF1A56DB).withValues(alpha: 0.6),
+          disabledBackgroundColor:
+              const Color(0xFF1A56DB).withValues(alpha: 0.6),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
@@ -461,7 +462,9 @@ class _TeacherUploadScreenState extends ConsumerState<TeacherUploadScreen> {
             correctOption: Value(q.correctOption),
             explanation: Value(q.explanation),
             positionInLesson: Value(i),
-            source: const Value('ai'),
+            // Students cannot read this row until the teacher explicitly
+            // approves it in the review screen.
+            source: const Value('ai_pending'),
           ),
         );
       }
@@ -476,6 +479,7 @@ class _TeacherUploadScreenState extends ConsumerState<TeacherUploadScreen> {
       // the class link. A silent local-only save reads as "sync is broken".
       final teacher = ref.read(currentTeacherProvider);
       var cloudLinked = false;
+      String? remoteNoteId;
       if (teacher != null) {
         final link = await ref
             .read(backendLinkServiceProvider)
@@ -485,16 +489,23 @@ class _TeacherUploadScreenState extends ConsumerState<TeacherUploadScreen> {
         final title = (topic != null && topic.name.trim().isNotEmpty)
             ? topic.name.trim()
             : (_fileName ?? 'Lesson');
-        unawaited(ref.read(backendLinkServiceProvider).uploadTeacherNote(
-              localTeacherId: teacher.id,
-              localLessonId: lessonId,
-              title: title,
-              gradeLevel: 'General',
-              lessonText: _extractedText,
-              // Same questions the students will hear — pushed as unapproved
-              // review items so the teacher can vet them from any device.
-              questions: aiQuestions,
-            ));
+        remoteNoteId =
+            await ref.read(backendLinkServiceProvider).uploadTeacherNote(
+                  localTeacherId: teacher.id,
+                  localLessonId: lessonId,
+                  title: title,
+                  gradeLevel: 'General',
+                  lessonText: _extractedText,
+                  // Same questions the students will hear — pushed as unapproved
+                  // review items so the teacher can vet them from any device.
+                  questions: aiQuestions,
+                );
+        if (cloudLinked && remoteNoteId == null) {
+          throw Exception(
+            'The lesson could not be shared with the class. '
+            'Nothing is available to students yet.',
+          );
+        }
       }
 
       setState(() {
@@ -512,8 +523,10 @@ class _TeacherUploadScreenState extends ConsumerState<TeacherUploadScreen> {
       await Future.delayed(const Duration(seconds: 1));
       if (mounted) {
         context.pushNamed(
-          'teacherQuestions',
-          pathParameters: {'lessonId': lessonId.toString()},
+          cloudLinked ? 'teacherReview' : 'teacherQuestions',
+          pathParameters: {
+            'lessonId': lessonId.toString(),
+          },
         );
       }
     } catch (e) {

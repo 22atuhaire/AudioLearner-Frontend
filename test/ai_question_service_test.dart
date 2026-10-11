@@ -1,4 +1,5 @@
 import 'package:audioapp/shared/services/ai_question_service.dart';
+import 'package:audioapp/shared/services/question_answer_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// Unit tests for [AiQuestionService] — the offline, deterministic quiz
@@ -93,8 +94,7 @@ Following BODMAS, addition and subtraction are done from left to right.
       expect(questions, isNotEmpty);
     });
 
-    test('never builds a subject from a subordinate clause or fused label',
-        () {
+    test('never builds a subject from a subordinate clause or fused label', () {
       for (final q in questions) {
         // "What is Since 6?" / "What are Following BODMAS…?"
         expect(q.questionText, isNot(contains('Since')));
@@ -108,8 +108,8 @@ Following BODMAS, addition and subtraction are done from left to right.
     test('conditional rules are never presented as definitions', () {
       for (final q in questions) {
         // "A number is divisible by 2 IF…" is a rule, not what a number IS.
-        expect(q.questionText.toLowerCase(),
-            isNot(contains('what is a number')));
+        expect(
+            q.questionText.toLowerCase(), isNot(contains('what is a number')));
       }
     });
 
@@ -129,8 +129,8 @@ Following BODMAS, addition and subtraction are done from left to right.
     });
 
     test('the Addends definition is extracted correctly', () {
-      final addends = questions.where(
-          (q) => q.questionText.toLowerCase().contains('addends'));
+      final addends = questions
+          .where((q) => q.questionText.toLowerCase().contains('addends'));
       for (final q in addends) {
         expect(q.questionText.toLowerCase(), 'what are addends?');
       }
@@ -198,9 +198,13 @@ A preposition is a word that shows the position of a noun.
     test('reaches later sections of the note', () {
       final joined =
           questions.map((q) => q.questionText.toLowerCase()).join(' | ');
-      final laterTopics = ['pronoun', 'verb', 'adjective', 'adverb', 'preposition']
-          .where(joined.contains)
-          .length;
+      final laterTopics = [
+        'pronoun',
+        'verb',
+        'adjective',
+        'adverb',
+        'preposition'
+      ].where(joined.contains).length;
       expect(laterTopics, greaterThanOrEqualTo(3),
           reason: 'later sections were never reached: $joined');
     });
@@ -208,10 +212,102 @@ A preposition is a word that shows the position of a noun.
     test('asks about distinct topics rather than repeating one', () {
       final heads = questions
           .map((q) => q.questionText.toLowerCase())
-          .map((t) => t.replaceAll(RegExp(r'^what (is|are) |^when (is|are) '), ''))
+          .map((t) =>
+              t.replaceAll(RegExp(r'^what (is|are) |^when (is|are) '), ''))
           .toSet();
       expect(heads.length, questions.length,
           reason: 'duplicate question subjects: $heads');
+    });
+  });
+
+  group('lesson question retrieval', () {
+    const lesson =
+        'Reproduction is the process by which living things produce new organisms. '
+        'Asexual reproduction involves only one parent and produces offspring that are genetically similar. '
+        'Sexual reproduction usually involves two parents.';
+
+    test('prefers a direct definition for what-is questions', () {
+      final answer = QuestionAnswerService().answer(
+        'What is reproduction?',
+        lesson,
+      );
+
+      expect(
+          answer,
+          startsWith(
+              'Reproduction is the process by which living things produce new organisms.'));
+      expect(answer, isNot(startsWith('Asexual reproduction')));
+    });
+  });
+
+  group('teachable question wording', () {
+    test('keeps the complete definition answer', () {
+      const note = '''
+The digestive system is the group of organs that work together to digest food.
+The alimentary canal is the long tube that runs from the mouth to the anus.
+Hydrochloric acid is the acid in the stomach that kills germs found in food.
+Peristalsis is the wave-like movement of muscles that pushes food along the gut.
+Constipation is a condition where a person fails to pass out faeces easily.
+''';
+
+      final questions = service.generateQuestions(note);
+      final digestive = questions.firstWhere(
+        (q) => q.questionText.toLowerCase() == 'what is the digestive system?',
+      );
+      expect(
+        [
+          digestive.optionA,
+          digestive.optionB,
+          digestive.optionC,
+          digestive.optionD,
+        ][const ['A', 'B', 'C', 'D'].indexOf(digestive.correctOption)],
+        'the group of organs that work together to digest food',
+      );
+    });
+
+    test('uses informative identification questions for named features', () {
+      const note = '''
+Mount Rwenzori is the highest mountain in Uganda and it is found in the west.
+Mount Elgon is an extinct volcano that is found in the east of Uganda.
+Mount Moroto is a mountain found in the north east of Uganda in Karamoja.
+Lake Victoria is the largest lake in Uganda and in the whole of Africa.
+Lake Albert is a rift valley lake found in the western part of Uganda.
+''';
+
+      final questions = service.generateQuestions(note);
+      expect(
+        questions.any(
+            (q) => q.questionText.toLowerCase().contains('highest mountain')),
+        isTrue,
+      );
+      expect(
+        questions.any(
+            (q) => q.questionText.toLowerCase().contains('extinct volcano')),
+        isTrue,
+      );
+      expect(
+        questions
+            .any((q) => q.questionText.toLowerCase().contains('largest lake')),
+        isTrue,
+      );
+    });
+
+    test('turns explain-why activities into causal questions', () {
+      const note = '''
+Altitude is the height of a place above sea level.
+Places at a high altitude such as Kabale are colder than places at a low altitude.
+Explain why Kabale is colder than Kampala.
+Rainfall is the amount of water that falls from the clouds onto the ground.
+Temperature is the degree of hotness or coldness of a place.
+''';
+
+      final questions = service.generateQuestions(note);
+      final question = questions.firstWhere(
+        (q) => q.questionText.toLowerCase().startsWith('explain why kabale'),
+      );
+      expect(
+          question.questionText, 'Explain why Kabale is colder than Kampala?');
+      expect(question.explanation, contains('high altitude'));
     });
   });
 }

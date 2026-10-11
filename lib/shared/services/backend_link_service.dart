@@ -503,9 +503,8 @@ class BackendLinkService {
       notes = const [];
     }
 
-    String? subjectId = me != null && me.subjects.isNotEmpty
-        ? me.subjects.first.id
-        : null;
+    String? subjectId =
+        me != null && me.subjects.isNotEmpty ? me.subjects.first.id : null;
     String? classId = me?.classId;
     var cleanSubject = me != null && me.subjects.isNotEmpty
         ? me.subjects.first.subjectName
@@ -575,8 +574,8 @@ class BackendLinkService {
         final topicId = await db.topicDao.insertTopic(
           TopicsTableCompanion(
             subjectId: Value(localSubjectId),
-            name: Value(
-                note.title.trim().isEmpty ? 'Lesson' : note.title.trim()),
+            name:
+                Value(note.title.trim().isEmpty ? 'Lesson' : note.title.trim()),
             orderIndex: Value(order++),
             createdAt: Value(createdAt),
           ),
@@ -614,6 +613,68 @@ class BackendLinkService {
       throw BackendApiException('Could not rebuild your local profile.');
     }
     return teacher;
+  }
+
+  Future<void> _refreshApprovedQuestions({
+    required AppDatabase db,
+    required int lessonId,
+    required String noteId,
+    required String baseUrl,
+    required String token,
+  }) async {
+    final units = await _api.getUnits(
+      baseUrl: baseUrl,
+      accessToken: token,
+      noteId: noteId,
+    );
+    final artefactsPerUnit = await Future.wait(
+      units.map(
+        (unit) => _api.getArtefacts(
+          baseUrl: baseUrl,
+          accessToken: token,
+          noteId: noteId,
+          unitId: unit.id,
+        ),
+      ),
+    );
+    final approved = [
+      for (final artefacts in artefactsPerUnit)
+        for (final artefact in artefacts)
+          if (artefact.isMultipleChoice && artefact.options.length >= 2)
+            artefact,
+    ];
+    if (approved.isEmpty) return;
+
+    await db.transaction(() async {
+      await db.questionDao.deleteQuestionsByLessonId(lessonId);
+      const letters = ['A', 'B', 'C', 'D'];
+      for (var position = 0; position < approved.length; position++) {
+        final artefact = approved[position];
+        final correctIndex =
+            artefact.options.indexWhere((option) => option.isCorrect);
+        String? optionAt(int index) => index < artefact.options.length
+            ? artefact.options[index].text
+            : null;
+        await db.questionDao.insertQuestion(
+          QuestionsTableCompanion(
+            lessonId: Value(lessonId),
+            questionText: Value(artefact.questionText),
+            optionA: Value(optionAt(0) ?? ''),
+            optionB: Value(optionAt(1) ?? ''),
+            optionC: Value(optionAt(2) ?? ''),
+            optionD: Value(optionAt(3)),
+            correctOption: Value(
+              correctIndex >= 0 && correctIndex < letters.length
+                  ? letters[correctIndex]
+                  : 'A',
+            ),
+            explanation: Value(artefact.explanation),
+            positionInLesson: Value(position),
+            source: const Value('cloud'),
+          ),
+        );
+      }
+    });
   }
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -838,10 +899,7 @@ class BackendLinkService {
                     {'text': q.optionB, 'is_correct': q.correctOption == 'B'},
                     {'text': q.optionC, 'is_correct': q.correctOption == 'C'},
                     if (q.optionD.trim().isNotEmpty)
-                      {
-                        'text': q.optionD,
-                        'is_correct': q.correctOption == 'D'
-                      },
+                      {'text': q.optionD, 'is_correct': q.correctOption == 'D'},
                   ],
                   'explanation': q.explanation,
                 },
@@ -1018,7 +1076,23 @@ class BackendLinkService {
 
       for (final note in notes) {
         if (!note.isReady) continue;
-        if (syncedMap.containsKey(note.id)) continue;
+        final existingLessonId = int.tryParse(
+          syncedMap[note.id]?.toString() ?? '',
+        );
+        if (existingLessonId != null) {
+          try {
+            await _refreshApprovedQuestions(
+              db: db,
+              lessonId: existingLessonId,
+              noteId: note.id,
+              baseUrl: link.baseUrl,
+              token: token,
+            );
+          } catch (_) {
+            // Preserve the last known approved cache when a refresh fails.
+          }
+          continue;
+        }
 
         final subjectId = await _ensureCloudSubject(
           db: db,
@@ -1136,28 +1210,9 @@ class BackendLinkService {
           }
         }
 
-        // Notes whose text rode in via the description (no cloud AI pipeline)
-        // arrive without quiz artefacts. Regenerate the quiz locally from the
-        // lesson text using the same offline generator teachers use, so every
-        // cloud lesson still comes with questions.
-        if (position == 0) {
-          for (final q in AiQuestionService().generateQuestions(lessonText)) {
-            await db.questionDao.insertQuestion(
-              QuestionsTableCompanion(
-                lessonId: Value(lessonId),
-                questionText: Value(q.questionText),
-                optionA: Value(q.optionA),
-                optionB: Value(q.optionB),
-                optionC: Value(q.optionC),
-                optionD: Value(q.optionD),
-                correctOption: Value(q.correctOption),
-                explanation: Value(q.explanation),
-                positionInLesson: Value(position++),
-                source: const Value('cloud'),
-              ),
-            );
-          }
-        }
+        // Do not regenerate questions locally when the server has no approved
+        // artefacts. That would expose unverified AI output to a student,
+        // especially when teacher and student share this device.
 
         syncedMap[note.id] = lessonId;
         added += 1;

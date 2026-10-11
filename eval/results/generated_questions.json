@@ -1,0 +1,1139 @@
+[
+  {
+    "noteId": "01_number_operations_p6_math",
+    "title": "Higher Number Operations",
+    "questions": [
+      {
+        "index": 1,
+        "questionText": "What is the place value?",
+        "options": [
+          "divisible by 10 if its last digit is 0",
+          "the position of a digit in a number",
+          "a pattern of adding 2 each time",
+          "divisible by 2 if its last digit is even"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: The place value is the position of a digit in a number (like Ones, Tens, Hundreds, Thousands, Ten Thousands, Hundred Thousands, Millions).",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "place_value"
+        ]
+      },
+      {
+        "index": 2,
+        "questionText": "Fill in the blank. In the number 4,567,890, the digit 5 is in the blank place, so its total value is 500,000.",
+        "options": [
+          "Ten Thousands",
+          "divide",
+          "Hundred Thousands",
+          "Primary Six"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: In the number 4,567,890, the digit 5 is in the Hundred Thousands place, so its total value is 500,000.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 3,
+        "questionText": "Fill in the blank. In the number 3,486,789, if the digit 8 is underlined, its place value is blank and its total value is 80,000.",
+        "options": [
+          "Primary Six",
+          "Hundreds",
+          "Ten Thousands",
+          "Hundred Thousands"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: In the number 3,486,789, if the digit 8 is underlined, its place value is Ten Thousands and its total value is 80,000.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "place_value"
+        ]
+      },
+      {
+        "index": 4,
+        "questionText": "What are addends?",
+        "options": [
+          "the sum",
+          "the numbers being added",
+          "done from left to right",
+          "in the Hundred Thousands place"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: Addends are the numbers being added.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "addends"
+        ]
+      },
+      {
+        "index": 5,
+        "questionText": "What is the answer?",
+        "options": [
+          "done from left to right",
+          "the sum",
+          "the minuend",
+          "the numbers being added"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: The answer is the sum.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 6,
+        "questionText": "Fill in the blank. In blank, the number being subtracted from is the minuend, the number subtracted is the subtrahend, and the answer is the difference.",
+        "options": [
+          "adding",
+          "Millions",
+          "Bring",
+          "subtraction"
+        ],
+        "correctOption": "D",
+        "explanation": "From your lesson: In subtraction, the number being subtracted from is the minuend, the number subtracted is the subtrahend, and the answer is the difference.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 7,
+        "questionText": "Fill in the blank. When a number sentence has more than one operation, you must follow the order of blank: BODMAS.",
+        "options": [
+          "minuend",
+          "Bring",
+          "divisible",
+          "operations"
+        ],
+        "correctOption": "D",
+        "explanation": "From your lesson: When a number sentence has more than one operation, you must follow the order of operations: BODMAS.",
+        "autoValid": false,
+        "failedChecks": [
+          "A4_well_formed"
+        ],
+        "conceptsHit": [
+          "bodmas_order"
+        ]
+      },
+      {
+        "index": 8,
+        "questionText": "When is A number divisible by 2?",
+        "options": [
+          "its last digit is 0 or 5",
+          "its last digit is even",
+          "its last digit is 0",
+          "it is divisible by both 2 and 3"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: A number is divisible by 2 if its last digit is even (0, 2, 4, 6, 8).",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "divisibility_two"
+        ]
+      }
+    ]
+  },
+  {
+    "noteId": "02_living_things_p3_science",
+    "title": "Living and Non-Living Things",
+    "questions": [
+      {
+        "index": 1,
+        "questionText": "Fill in the blank. blank things are things that are ALIVE.",
+        "options": [
+          "chalkboard",
+          "matoke",
+          "animals",
+          "Living"
+        ],
+        "correctOption": "D",
+        "explanation": "From your lesson: Living things are things that are ALIVE.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "living_definition"
+        ]
+      },
+      {
+        "index": 2,
+        "questionText": "Fill in the blank. Non-living things are things that are blank.",
+        "options": [
+          "NOT ALIVE",
+          "ACTIVITY FOR",
+          "QUICK QUESTIONS",
+          "jerrycan"
+        ],
+        "correctOption": "A",
+        "explanation": "From your lesson: Non-living things are things that are NOT ALIVE.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "living_definition",
+          "nonliving_definition"
+        ]
+      },
+      {
+        "index": 3,
+        "questionText": "Fill in the blank. Bricks used for blank houses",
+        "options": [
+          "Grow",
+          "building",
+          "Pencil",
+          "respect"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: Bricks used for building houses",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 4,
+        "questionText": "Fill in the blank. Even a seed (like a bean seed) is a blank thing.",
+        "options": [
+          "bicycle",
+          "notebook",
+          "Living",
+          "Movement"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: Even a seed (like a bean seed) is a living thing.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      }
+    ]
+  },
+  {
+    "noteId": "03_food_nutrition_p4_science",
+    "title": "Food and Nutrition",
+    "questions": [
+      {
+        "index": 1,
+        "questionText": "Fill in the blank. Food is blank we eat or drink that gives us energy, helps us grow,",
+        "options": [
+          "Sewerage",
+          "anything",
+          "oxygen",
+          "Boiling"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: Food is anything we eat or drink that gives us energy, helps us grow,",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "food_definition"
+        ]
+      },
+      {
+        "index": 2,
+        "questionText": "Fill in the blank. You feel cold blank and have dry skin.",
+        "options": [
+          "ovacado",
+          "cassava",
+          "wounds",
+          "easily"
+        ],
+        "correctOption": "D",
+        "explanation": "From your lesson: You feel cold easily and have dry skin.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 3,
+        "questionText": "What is water?",
+        "options": [
+          "so important that we learn more",
+          "not just tasty – they have three times more protein than beef!",
+          "the only nutrient you cannot live without for more than a few",
+          "a meal that contains all six classes of food in the right"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: Water is the only nutrient you cannot live without for more than a few days.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 4,
+        "questionText": "What is a balanced diet?",
+        "options": [
+          "the only nutrient you cannot live without for more than a few",
+          "so important that we learn more",
+          "a meal that contains all six classes of food in the right",
+          "not just tasty – they have three times more protein than beef!"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: A balanced diet is a meal that contains all six classes of food in the right amounts.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "balanced_diet"
+        ]
+      },
+      {
+        "index": 5,
+        "questionText": "Fill in the blank. We already listed water as Class 6, but it is so blank that we learn more.",
+        "options": [
+          "grasshoppers",
+          "Vegetables",
+          "important",
+          "HABITS"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: We already listed water as Class 6, but it is so important that we learn more.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 6,
+        "questionText": "Fill in the blank. If you are a school-going child, carry a healthy lunchbox: e.g., boiled egg, chapati with blank, a piece of fruit.",
+        "options": [
+          "Removes",
+          "people",
+          "diarrhoea",
+          "groundnut"
+        ],
+        "correctOption": "D",
+        "explanation": "From your lesson: If you are a school-going child, carry a healthy lunchbox: e.g., boiled egg, chapati with groundnut, a piece of fruit.",
+        "autoValid": false,
+        "failedChecks": [
+          "A4_well_formed"
+        ],
+        "conceptsHit": []
+      },
+      {
+        "index": 7,
+        "questionText": "What is mukene (silver fish)?",
+        "options": [
+          "a school-going child",
+          "very good for children",
+          "anything we eat or drink",
+          "so important that we learn more"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: Mukene (silver fish) is very good for children because you eat the whole fish – bones and all – which gives calcium for strong teeth and bones!",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 8,
+        "questionText": "What are nsenene (grasshoppers)?",
+        "options": [
+          "the only nutrient you cannot live without for more than a few",
+          "a meal that contains all six classes of food in the right",
+          "not just tasty – they have three times more protein than beef!",
+          "so important that we learn more"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: Nsenene (grasshoppers) are not just tasty – they have three times more protein than beef!",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "proteins"
+        ]
+      }
+    ]
+  },
+  {
+    "noteId": "04_water_p5_science",
+    "title": "Water",
+    "questions": [
+      {
+        "index": 1,
+        "questionText": "What is water?",
+        "options": [
+          "the commonest method of making water safe at home",
+          "a disease that causes diarrhoea with blood in the stool",
+          "diseases that people get from drinking unsafe water",
+          "used at home and at school for many activities"
+        ],
+        "correctOption": "D",
+        "explanation": "From your lesson: Water is used at home and at school for many activities.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 2,
+        "questionText": "What is melting?",
+        "options": [
+          "the ordinary water we drink from a cup",
+          "the change from liquid water to ice",
+          "the change from ice to liquid water",
+          "diseases that people get from drinking unsafe water"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: Melting is the change from ice to liquid water.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 3,
+        "questionText": "What is freezing?",
+        "options": [
+          "the change from ice to liquid water",
+          "the change from liquid water to ice",
+          "the ordinary water we drink from a cup",
+          "diseases that people get from drinking unsafe water"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: Freezing is the change from liquid water to ice.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 4,
+        "questionText": "What is boiling?",
+        "options": [
+          "the commonest method of making water safe at home",
+          "a disease that causes diarrhoea with blood in the stool",
+          "the ordinary water we drink from a cup",
+          "used at home and at school for many activities"
+        ],
+        "correctOption": "A",
+        "explanation": "From your lesson: Boiling is the commonest method of making water safe at home.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "boiling"
+        ]
+      },
+      {
+        "index": 5,
+        "questionText": "What is sedimentation?",
+        "options": [
+          "a disease that causes diarrhoea with blood in the stool",
+          "the process of letting dirt settle at the bottom of a container",
+          "also used in industries for making drinks and for cooling machines",
+          "used at home and at school for many activities"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: Sedimentation is the process of letting dirt settle at the bottom of a container.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 6,
+        "questionText": "What are water borne diseases?",
+        "options": [
+          "diseases that people get from drinking unsafe water",
+          "the change from liquid water to ice",
+          "the change from ice to liquid water",
+          "the ordinary water we drink from a cup"
+        ],
+        "correctOption": "A",
+        "explanation": "From your lesson: Water borne diseases are diseases that people get from drinking unsafe water.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "safe_water"
+        ]
+      },
+      {
+        "index": 7,
+        "questionText": "What is cholera?",
+        "options": [
+          "used at home and at school for many activities",
+          "the commonest method of making water safe at home",
+          "a water borne disease that causes severe diarrhoea and vomiting",
+          "a disease that causes diarrhoea with blood in the stool"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: Cholera is a water borne disease that causes severe diarrhoea and vomiting.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 8,
+        "questionText": "What is typhoid?",
+        "options": [
+          "the process of letting dirt settle at the bottom of a container",
+          "a disease that causes diarrhoea with blood in the stool",
+          "also used in industries for making drinks and for cooling machines",
+          "a water borne disease that causes high fever and stomach pain"
+        ],
+        "correctOption": "D",
+        "explanation": "From your lesson: Typhoid is a water borne disease that causes high fever and stomach pain.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      }
+    ]
+  },
+  {
+    "noteId": "05_digestive_system_p6_science",
+    "title": "The Digestive System",
+    "questions": [
+      {
+        "index": 1,
+        "questionText": "What is digestion?",
+        "options": [
+          "a condition where a person fails to pass out faeces easily",
+          "the destruction of a tooth caused by germs acting on sugar",
+          "the process by which food is broken down into small particles",
+          "the long tube that runs from the mouth to the anus"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: Digestion is the process by which food is broken down into small particles",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "digestion_definition"
+        ]
+      },
+      {
+        "index": 2,
+        "questionText": "What is the digestive system?",
+        "options": [
+          "the part that stores faeces before they are passed out",
+          "the large back teeth used for chewing and grinding food",
+          "prevented by eating foods with roughage and drinking enough water",
+          "the group of organs that work together to digest food"
+        ],
+        "correctOption": "D",
+        "explanation": "From your lesson: The digestive system is the group of organs that work together to digest food.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 3,
+        "questionText": "What is the alimentary canal?",
+        "options": [
+          "the tube that carries food from the mouth to the stomach",
+          "the process by which food is broken down into small particles",
+          "the long tube that runs from the mouth to the anus",
+          "a condition where a person fails to pass out faeces easily"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: The alimentary canal is the long tube that runs from the mouth to the anus.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "alimentary_canal"
+        ]
+      },
+      {
+        "index": 4,
+        "questionText": "What is the mouth?",
+        "options": [
+          "the acid in the stomach",
+          "the liquid in the stomach",
+          "the part where digestion begins",
+          "the wave-like movement of muscles"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: The mouth is the part where digestion begins.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 5,
+        "questionText": "What are incisors?",
+        "options": [
+          "the part where most digestion and absorption take place",
+          "the front teeth used for cutting and biting food",
+          "the largest gland in the body and it produces bile",
+          "the large back teeth used for chewing and grinding food"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: Incisors are the front teeth used for cutting and biting food.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "incisors"
+        ]
+      },
+      {
+        "index": 6,
+        "questionText": "What is tooth decay?",
+        "options": [
+          "the destruction of a tooth caused by germs acting on sugar",
+          "a condition where a person fails to pass out faeces easily",
+          "the tube that carries food from the mouth to the stomach",
+          "the process by which food is broken down into small particles"
+        ],
+        "correctOption": "A",
+        "explanation": "From your lesson: Tooth decay is the destruction of a tooth caused by germs acting on sugar.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 7,
+        "questionText": "What is constipation?",
+        "options": [
+          "a condition where a person fails to pass out faeces easily",
+          "the long tube that runs from the mouth to the anus",
+          "the process by which food is broken down into small particles",
+          "the tube that carries food from the mouth to the stomach"
+        ],
+        "correctOption": "A",
+        "explanation": "From your lesson: Constipation is a condition where a person fails to pass out faeces easily.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      }
+    ]
+  },
+  {
+    "noteId": "06_weather_climate_p5_sst",
+    "title": "Weather and Climate",
+    "questions": [
+      {
+        "index": 1,
+        "questionText": "What is weather?",
+        "options": [
+          "the things that make up the weather of a place",
+          "the average weather condition of a place recorded over a long time",
+          "the condition of the atmosphere of a place at a particular time",
+          "the prediction of the weather of a place in advance"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: Weather is the condition of the atmosphere of a place at a particular time.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "weather_definition"
+        ]
+      },
+      {
+        "index": 2,
+        "questionText": "What is climate?",
+        "options": [
+          "the instrument used for measuring the speed of the wind",
+          "the things that make up the weather of a place",
+          "the condition of the atmosphere of a place at a particular time",
+          "the average weather condition of a place recorded over a long time"
+        ],
+        "correctOption": "D",
+        "explanation": "From your lesson: Climate is the average weather condition of a place recorded over a long time.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "climate_definition"
+        ]
+      },
+      {
+        "index": 3,
+        "questionText": "What is temperature?",
+        "options": [
+          "that weather changes from day to day while climate",
+          "the degree of hotness or coldness of a place",
+          "air that is moving from one place to another",
+          "the instrument used for measuring the amount of rainfall"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: Temperature is the degree of hotness or coldness of a place.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 4,
+        "questionText": "What is a rain gauge?",
+        "options": [
+          "the instrument used for measuring the amount of rainfall",
+          "the instrument that shows the direction of the wind",
+          "air that is moving from one place to another",
+          "a place where the elements of weather are recorded"
+        ],
+        "correctOption": "A",
+        "explanation": "From your lesson: A rain gauge is the instrument used for measuring the amount of rainfall.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "rain_gauge"
+        ]
+      },
+      {
+        "index": 5,
+        "questionText": "What is altitude?",
+        "options": [
+          "the height of a place above sea level",
+          "the degree of hotness or coldness of a place",
+          "the distance of a place from the equator",
+          "the instrument used for measuring atmospheric pressure"
+        ],
+        "correctOption": "A",
+        "explanation": "From your lesson: Altitude is the height of a place above sea level.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 6,
+        "questionText": "What is weather forecasting?",
+        "options": [
+          "the prediction of the weather of a place in advance",
+          "the instrument used for measuring the speed of the wind",
+          "the things that make up the weather of a place",
+          "the instrument used for measuring humidity in the air"
+        ],
+        "correctOption": "A",
+        "explanation": "From your lesson: Weather forecasting is the prediction of the weather of a place in advance.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 7,
+        "questionText": "Explain why Kabale is colder than Kampala?",
+        "options": [
+          "Because Kabale is closer to sea level than Kampala",
+          "Because Kabale receives more sunshine than Kampala",
+          "Because Kabale is at a higher altitude than Kampala",
+          "Because Kampala is located on a mountain"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: Places at a high altitude such as Kabale are colder than places at a low altitude.",
+        "autoValid": false,
+        "failedChecks": [
+          "A3_content_bound"
+        ],
+        "conceptsHit": []
+      }
+    ]
+  },
+  {
+    "noteId": "07_physical_features_p5_sst",
+    "title": "Physical Features of Uganda",
+    "questions": [
+      {
+        "index": 1,
+        "questionText": "What are physical features?",
+        "options": [
+          "the highest mountain in Uganda and it is found in the west",
+          "an extinct volcano that is found in the east of Uganda",
+          "the natural things that are found on the surface of the earth",
+          "small round lakes that form in the mouth of an old volcano"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: Physical features are the natural things that are found on the surface of the earth.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "features_definition"
+        ]
+      },
+      {
+        "index": 2,
+        "questionText": "Which is the highest mountain in Uganda and it is found in the west?",
+        "options": [
+          "Volcanic mountains",
+          "Mount Elgon",
+          "mount Rwenzori",
+          "Crater lakes"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: Mount Rwenzori is the highest mountain in Uganda and it is found in the west.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "rwenzori"
+        ]
+      },
+      {
+        "index": 3,
+        "questionText": "What is the highest peak of Mount Rwenzori?",
+        "options": [
+          "sources of rivers",
+          "called Margherita",
+          "a long deep valley",
+          "pushed up"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: The highest peak of Mount Rwenzori is called Margherita.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "rwenzori"
+        ]
+      },
+      {
+        "index": 4,
+        "questionText": "Which extinct volcano found in the east of Uganda?",
+        "options": [
+          "A lake",
+          "Lake Albert",
+          "Crater lakes",
+          "mount Elgon"
+        ],
+        "correctOption": "D",
+        "explanation": "From your lesson: Mount Elgon is an extinct volcano that is found in the east of Uganda.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 5,
+        "questionText": "What is mount Moroto?",
+        "options": [
+          "a rift valley lake found in the western part of Uganda",
+          "a mountain found in the north east of Uganda in Karamoja",
+          "mountains that form when molten rock comes out of the earth",
+          "the largest lake in Uganda and in the whole of Africa"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: Mount Moroto is a mountain found in the north east of Uganda in Karamoja.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 6,
+        "questionText": "What is a lake?",
+        "options": [
+          "a large body of water that is surrounded by land",
+          "mountains that form when molten rock comes out of the earth",
+          "a shallow lake found in the central part of Uganda",
+          "a block mountain while Mount Elgon is a volcanic mountain"
+        ],
+        "correctOption": "A",
+        "explanation": "From your lesson: A lake is a large body of water that is surrounded by land.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 7,
+        "questionText": "What is a river?",
+        "options": [
+          "a shallow lake found in the central part of Uganda",
+          "a block mountain while Mount Elgon is a volcanic mountain",
+          "used for generating hydro electricity at Owen Falls",
+          "a natural stream of water flowing towards a lake"
+        ],
+        "correctOption": "D",
+        "explanation": "From your lesson: A river is a natural stream of water flowing towards a lake, a sea or an ocean.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      }
+    ]
+  },
+  {
+    "noteId": "08_fractions_p5_math",
+    "title": "Fractions",
+    "questions": [
+      {
+        "index": 1,
+        "questionText": "What is a fraction?",
+        "options": [
+          "a fraction whose numerator is smaller than its denominator",
+          "a number that represents a part of a whole",
+          "fractions that have the same value but different numbers",
+          "the number written below the line in a fraction"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: A fraction is a number that represents a part of a whole.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "fraction_definition"
+        ]
+      },
+      {
+        "index": 2,
+        "questionText": "What is the numerator?",
+        "options": [
+          "a number that represents a part of a whole",
+          "fractions that have the same value but different numbers",
+          "the number written above the line in a fraction",
+          "the number written below the line in a fraction"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: The numerator is the number written above the line in a fraction.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "numerator"
+        ]
+      },
+      {
+        "index": 3,
+        "questionText": "What is the denominator?",
+        "options": [
+          "a fraction whose numerator is smaller than its denominator",
+          "a number that represents a part of a whole",
+          "the number written below the line in a fraction",
+          "fractions that have the same value but different numbers"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: The denominator is the number written below the line in a fraction.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "denominator"
+        ]
+      },
+      {
+        "index": 4,
+        "questionText": "What is a mixed number?",
+        "options": [
+          "the number written below the line in a fraction",
+          "a number that has a whole number part and a fraction part",
+          "a number that represents a part of a whole",
+          "the number written above the line in a fraction"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: A mixed number is a number that has a whole number part and a fraction part.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 5,
+        "questionText": "What are equivalent fractions?",
+        "options": [
+          "a fraction whose numerator is smaller than its denominator",
+          "the number written below the line in a fraction",
+          "the number written above the line in a fraction",
+          "fractions that have the same value but different numbers"
+        ],
+        "correctOption": "D",
+        "explanation": "From your lesson: Equivalent fractions are fractions that have the same value but different numbers.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "equivalent_fractions"
+        ]
+      }
+    ]
+  },
+  {
+    "noteId": "09_parts_of_speech_p6_english",
+    "title": "Parts of Speech",
+    "questions": [
+      {
+        "index": 1,
+        "questionText": "Fill in the blank. A part of blank is the name given to a word according to the work it does",
+        "options": [
+          "speech",
+          "pronoun",
+          "relationship",
+          "pronouns"
+        ],
+        "correctOption": "A",
+        "explanation": "From your lesson: A part of speech is the name given to a word according to the work it does",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 2,
+        "questionText": "What is a noun?",
+        "options": [
+          "a word that describes a verb",
+          "a word that names a person",
+          "used in place of the noun Mary",
+          "a word that joins words"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: A noun is a word that names a person, a place, an animal or a thing.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "noun"
+        ]
+      },
+      {
+        "index": 3,
+        "questionText": "What is a pronoun?",
+        "options": [
+          "a noun that names a particular person or place and begins",
+          "a word that is used in place of a noun",
+          "a verb that is used together with a main verb",
+          "a noun that names a group of things taken together"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: A pronoun is a word that is used in place of a noun.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "pronoun"
+        ]
+      },
+      {
+        "index": 4,
+        "questionText": "What is a helping verb?",
+        "options": [
+          "a verb that is used together with a main verb",
+          "a noun that names a group of things taken together",
+          "a word that shows the position or relationship of a noun",
+          "a word that is used in place of a noun"
+        ],
+        "correctOption": "A",
+        "explanation": "From your lesson: A helping verb is a verb that is used together with a main verb, such as is or have.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 5,
+        "questionText": "What is an adjective?",
+        "options": [
+          "a noun that names a group of things taken together",
+          "a word that expresses a sudden strong feeling",
+          "a word that describes a noun or a pronoun",
+          "a word that is used in place of a noun"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: An adjective is a word that describes a noun or a pronoun.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "pronoun",
+          "adjective"
+        ]
+      },
+      {
+        "index": 6,
+        "questionText": "What is a preposition?",
+        "options": [
+          "a noun that names any one of a group of things",
+          "a word that shows the position or relationship of a noun",
+          "a noun that names a particular person or place and begins",
+          "a noun that names something we can think of but cannot touch"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: A preposition is a word that shows the position or relationship of a noun",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 7,
+        "questionText": "What is an interjection?",
+        "options": [
+          "a word that describes a noun or a pronoun",
+          "a word that expresses a sudden strong feeling",
+          "used in place of the noun Mary",
+          "eight parts of speech in the English language"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: An interjection is a word that expresses a sudden strong feeling.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      }
+    ]
+  },
+  {
+    "noteId": "10_hygiene_disease_p4_health",
+    "title": "Personal Hygiene and Disease Prevention",
+    "questions": [
+      {
+        "index": 1,
+        "questionText": "What is personal hygiene?",
+        "options": [
+          "prevented by sleeping under a treated mosquito net and by draining",
+          "the practice of keeping our bodies and our clothes clean",
+          "a disease that is caused by drinking water that contains germs",
+          "the washing of the whole body with clean water and soap"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: Personal hygiene is the practice of keeping our bodies and our clothes clean",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "hygiene_definition"
+        ]
+      },
+      {
+        "index": 2,
+        "questionText": "What is a germ?",
+        "options": [
+          "a skin disease that is caused by a fungus and it forms",
+          "a skin disease that is caused by a small insect that burrows",
+          "the giving of a vaccine to protect a person against a disease",
+          "a very small living thing that causes disease and cannot be seen"
+        ],
+        "correctOption": "D",
+        "explanation": "From your lesson: A germ is a very small living thing that causes disease and cannot be seen",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "germ"
+        ]
+      },
+      {
+        "index": 3,
+        "questionText": "What is bathing?",
+        "options": [
+          "prevented by sleeping under a treated mosquito net and by draining",
+          "the practice of keeping our bodies and our clothes clean",
+          "a disease that is caused by drinking water that contains germs",
+          "the washing of the whole body with clean water and soap"
+        ],
+        "correctOption": "D",
+        "explanation": "From your lesson: Bathing is the washing of the whole body with clean water and soap.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      },
+      {
+        "index": 4,
+        "questionText": "What is malaria?",
+        "options": [
+          "prevented by sleeping under a treated mosquito net and by draining",
+          "a disease that is caused by drinking water that contains germs",
+          "the washing of the whole body with clean water and soap",
+          "a skin disease that is caused by a fungus and it forms"
+        ],
+        "correctOption": "A",
+        "explanation": "From your lesson: Malaria is prevented by sleeping under a treated mosquito net and by draining",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "malaria"
+        ]
+      },
+      {
+        "index": 5,
+        "questionText": "What is immunisation?",
+        "options": [
+          "a skin disease that is caused by a small insect that burrows",
+          "a skin disease that is caused by a fungus and it forms",
+          "the giving of a vaccine to protect a person against a disease",
+          "a disease that is caused by drinking water that contains germs"
+        ],
+        "correctOption": "C",
+        "explanation": "From your lesson: Immunisation is the giving of a vaccine to protect a person against a disease.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": [
+          "immunisation"
+        ]
+      },
+      {
+        "index": 6,
+        "questionText": "What are children in Uganda immunised against?",
+        "options": [
+          "watery diarrhoea",
+          "six killer diseases",
+          "high fever",
+          "a very small living thing"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: Children in Uganda are immunised against six killer diseases.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
+      }
+    ]
+  }
+]

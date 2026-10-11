@@ -11,6 +11,9 @@ import 'dart:math' as math;
 class QuestionAnswerService {
   static final RegExp _tokenizer = RegExp(r'[a-z0-9]+');
   static final RegExp _sentenceSplit = RegExp(r'(?<=[.!?])\s+');
+  static final RegExp _definitionQuestion =
+      RegExp(r'^\s*what\s+(?:is|are)\s+(.+?)\s*[?.!]??\s*$',
+          caseSensitive: false);
 
   static const Set<String> _stopwords = {
     'the', 'a', 'an', 'and', 'or', 'but', 'of', 'to', 'in', 'on', 'at', 'for',
@@ -35,6 +38,7 @@ class QuestionAnswerService {
 
     final qTokens = _content(question);
     if (qTokens.isEmpty) return null;
+    final definitionSubject = _definitionSubject(question);
 
     // Per-sentence token sets + document frequency for IDF weighting.
     final sentTokens = sentences.map(_content).map((l) => l.toSet()).toList();
@@ -55,6 +59,14 @@ class QuestionAnswerService {
           final idf = math.log(1 + n / (df[qt] ?? 1));
           score += idf;
         }
+      }
+      if (definitionSubject != null &&
+          _startsWithDefinition(sentences[i], definitionSubject)) {
+        // For "What is X?", prefer the sentence that defines X directly.
+        // Without this, a shorter sentence such as "Asexual reproduction..."
+        // can outrank "Reproduction is the process..." after length
+        // normalisation even though both contain the same subject word.
+        score += 3.0;
       }
       if (score > 0) {
         // Mild length normalisation so a long sentence doesn't win just by
@@ -105,5 +117,20 @@ class QuestionAnswerService {
         .map((m) => m.group(0)!)
         .where((t) => t.length >= 2 && !_stopwords.contains(t))
         .toList();
+  }
+
+  String? _definitionSubject(String question) {
+    final match = _definitionQuestion.firstMatch(question);
+    final subject = match?.group(1)?.trim();
+    if (subject == null || subject.isEmpty) return null;
+    return subject.replaceFirst(RegExp(r'[?.!]$'), '').trim();
+  }
+
+  bool _startsWithDefinition(String sentence, String subject) {
+    final pattern = RegExp(
+      '^${RegExp.escape(subject)}\\s+(?:is|are|was|were)\\b',
+      caseSensitive: false,
+    );
+    return pattern.hasMatch(sentence.trim());
   }
 }
