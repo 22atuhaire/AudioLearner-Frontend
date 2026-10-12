@@ -299,8 +299,7 @@ class _StudentLearningHubScreenState
   /// Entry point for the voice-guided "join your class" flow, surfaced as a
   /// header icon so a student is never stuck without a class code prompt.
   Future<void> _openJoinClassFlow() async {
-    final student = _currentStudent ??
-        await _activeStudent();
+    final student = _currentStudent ?? await _activeStudent();
     if (!mounted || student == null) return;
     setState(() => _currentStudent = student);
 
@@ -500,6 +499,20 @@ class _StudentLearningHubScreenState
     // our own announcement echoing back through the microphone — never treat
     // it as a high-impact selection command.
     final isShortPhrase = command.split(RegExp(r'\s+')).length <= 4;
+
+    // Joining is available even when the student has no subjects. Keep this
+    // before subject matching so "join my class" cannot be mistaken for a
+    // subject name or navigation command.
+    if (has([
+      'join class',
+      'join my class',
+      'join a class',
+      'connect to class',
+      'class code',
+    ])) {
+      unawaited(_openJoinClassFlow());
+      return true;
+    }
 
     // In an active quiz, "answer two" / "option three" / a bare number picks
     // an option directly and submits it.
@@ -1072,7 +1085,10 @@ class _StudentLearningHubScreenState
 
   String _announcementText() {
     final subjects = _subjects();
-    if (subjects.isEmpty) return 'No subjects available.';
+    if (subjects.isEmpty) {
+      return 'No subjects available. Say join class to read your teacher code, '
+          'or tap the join class button.';
+    }
 
     final subject = subjects[_subjectIndex.clamp(0, subjects.length - 1)];
     final topics = _topicsForSubject(subject);
@@ -1090,9 +1106,8 @@ class _StudentLearningHubScreenState
               'Double tap to revise it.';
         }
         final listed = subjects.take(8).map((s) => s.name).join(', ');
-        final more = subjects.length > 8
-            ? ', and ${subjects.length - 8} more'
-            : '';
+        final more =
+            subjects.length > 8 ? ', and ${subjects.length - 8} more' : '';
         return 'You have ${subjects.length} subjects. $listed$more. '
             'Swipe left or right to browse, then double tap the one you want. '
             'Or just say a subject name.';
@@ -1374,8 +1389,8 @@ class _StudentLearningHubScreenState
       final raw = lesson?.rawText.trim() ?? '';
       if (raw.isEmpty) {
         if (mounted) setState(() => _lessonPlaying = false);
-        unawaited(_announceAndListen(
-            'This lesson has no content to read yet.'));
+        unawaited(
+            _announceAndListen('This lesson has no content to read yet.'));
         return;
       }
       final ok = await tts.speakAndWait(raw);
@@ -1403,9 +1418,8 @@ class _StudentLearningHubScreenState
       // Only the first segment of a resume starts partway through; every
       // later segment plays in full from its beginning.
       final segmentText = _lessonSegments[i].text;
-      final base = (i == startIndex)
-          ? startCharOffset.clamp(0, segmentText.length)
-          : 0;
+      final base =
+          (i == startIndex) ? startCharOffset.clamp(0, segmentText.length) : 0;
       final toSpeak = base == 0 ? segmentText : segmentText.substring(base);
 
       final completed = await tts.speakAndWait(toSpeak);
@@ -1502,8 +1516,7 @@ class _StudentLearningHubScreenState
     // just "Question N of M + the highlighted option". Repeating the "swipe /
     // double tap" guidance on all M questions drowned the actual content —
     // by ear, redundancy is cost, not reassurance. "Help" re-speaks it.
-    _announcementKey =
-        'quiz:$_subjectIndex:$_topicIndex:0:0:false:false';
+    _announcementKey = 'quiz:$_subjectIndex:$_topicIndex:0:0:false:false';
     unawaited(_announceSequenceAndListen([
       _quizInstructionsText(questions.length),
       _announcementText(),
@@ -1699,87 +1712,88 @@ class _StudentLearningHubScreenState
               // room, so centring still works without forcing an overflow.
               mainAxisSize: MainAxisSize.min,
               children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: accent.withValues(alpha: 0.16),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: accent, size: 40),
-          ),
-          const SizedBox(height: 16),
-          if (progress != null) ...[
-            Text(
-              progress,
-              style: TextStyle(
-                color: accent,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.1,
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: accent,
-              fontSize: 28,
-              fontWeight: FontWeight.w900,
-              height: 1.1,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            subtitle,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.grey.shade700,
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              height: 1.4,
-            ),
-          ),
-          if (body != null) ...[
-            const SizedBox(height: 16),
-            Text(
-              body,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.grey.shade800,
-                fontSize: 14,
-                height: 1.5,
-              ),
-            ),
-          ],
-          const SizedBox(height: 18),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.75),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Text(
-              actionLabel ?? hint,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: accent,
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            hint,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.grey.shade600,
-              fontSize: 12,
-            ),
-          ),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.16),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, color: accent, size: 40),
+                ),
+                const SizedBox(height: 16),
+                if (progress != null) ...[
+                  Text(
+                    progress,
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.1,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: accent,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                    height: 1.1,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  subtitle,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.grey.shade700,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    height: 1.4,
+                  ),
+                ),
+                if (body != null) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    body,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.grey.shade800,
+                      fontSize: 14,
+                      height: 1.5,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 18),
+                Container(
+                  width: double.infinity,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.75),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    actionLabel ?? hint,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  hint,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.grey.shade600,
+                    fontSize: 12,
+                  ),
+                ),
               ],
             ),
           ),
@@ -2171,152 +2185,154 @@ class _StudentLearningHubScreenState
           onPointerUp: _onPointerEnd,
           onPointerCancel: _onPointerEnd,
           child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onDoubleTap: _onDoubleTap,
-          onLongPress: _onLongPress,
-          onHorizontalDragEnd: (details) {
-            final velocity = details.primaryVelocity ?? 0;
-            if (velocity > 120) {
-              _onSwipeRight();
-            } else if (velocity < -120) {
-              _onSwipeLeft();
-            }
-          },
-          onVerticalDragEnd: (details) {
-            final velocity = details.primaryVelocity ?? 0;
-            if (velocity > 120) {
-              _onSwipeDown();
-            } else if (velocity < -120) {
-              _onSwipeUp();
-            }
-          },
-          child: Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Color(0xFFF5F9FF),
-                  Color(0xFFE7F0FF),
-                  Color(0xFFF6F7FB),
-                ],
+            behavior: HitTestBehavior.opaque,
+            onDoubleTap: _onDoubleTap,
+            onLongPress: _onLongPress,
+            onHorizontalDragEnd: (details) {
+              final velocity = details.primaryVelocity ?? 0;
+              if (velocity > 120) {
+                _onSwipeRight();
+              } else if (velocity < -120) {
+                _onSwipeLeft();
+              }
+            },
+            onVerticalDragEnd: (details) {
+              final velocity = details.primaryVelocity ?? 0;
+              if (velocity > 120) {
+                _onSwipeDown();
+              } else if (velocity < -120) {
+                _onSwipeUp();
+              }
+            },
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFFF5F9FF),
+                    Color(0xFFE7F0FF),
+                    Color(0xFFF6F7FB),
+                  ],
+                ),
               ),
-            ),
-            child: SafeArea(
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color:
-                                const Color(0xFF1A56DB).withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(14),
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1A56DB)
+                                  .withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: const Icon(
+                              Icons.headphones_rounded,
+                              color: Color(0xFF1A56DB),
+                              size: 22,
+                            ),
                           ),
-                          child: const Icon(
-                            Icons.headphones_rounded,
-                            color: Color(0xFF1A56DB),
-                            size: 22,
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Text(
+                              'Audio Learner',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                                color: Color(0xFF123B7A),
+                              ),
+                            ),
+                          ),
+                          if (_cloudSyncing) ...[
+                            const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                            const SizedBox(width: 10),
+                          ],
+                          _buildProgressButton(),
+                          const SizedBox(width: 8),
+                          _buildJoinClassButton(),
+                          const SizedBox(width: 8),
+                          _buildSignOutButton(),
+                          const SizedBox(width: 8),
+                          _stageChip(),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 220),
+                          // Keying on `_stage` (not the rebuilt subtree
+                          // itself) means a provider invalidation that leaves
+                          // the stage unchanged updates this subtree in place
+                          // instead of cross-fading — avoiding a transition
+                          // mid-dispose while a provider it depends on is also
+                          // being torn down/rebuilt.
+                          child: KeyedSubtree(
+                            key: ValueKey(_stage),
+                            child: _buildBody(subjectsAsync),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        const Expanded(
+                      ),
+                    ),
+                    // Real, focusable controls. Under TalkBack the custom
+                    // gestures below cannot be relied on — TalkBack consumes
+                    // swipes for its own navigation — so every action the
+                    // gestures offer also exists here as a labelled button the
+                    // student reaches by the standard swipe-to-next-item and
+                    // activates with the standard double-tap they already use
+                    // on every other app.
+                    if (AccessibilityMode.of(context).needsExplicitControls)
+                      _buildAccessibleControls(),
+                    // The footer teaches the gesture set. Under a screen reader
+                    // those gestures do not apply (TalkBack owns them) and the
+                    // buttons above are self-describing, so the footer would be
+                    // misleading clutter competing for scarce vertical space.
+                    if (!AccessibilityMode.of(context).needsExplicitControls)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.82),
+                            borderRadius: BorderRadius.circular(18),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.06),
+                                blurRadius: 16,
+                                offset: const Offset(0, 8),
+                              ),
+                            ],
+                          ),
                           child: Text(
-                            'Audio Learning Hub',
-                            style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                              color: Color(0xFF123B7A),
+                            _footerHint(),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF355CA8),
                             ),
                           ),
                         ),
-                        if (_cloudSyncing) ...[
-                          const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                          const SizedBox(width: 10),
-                        ],
-                        _buildProgressButton(),
-                        const SizedBox(width: 8),
-                        _buildJoinClassButton(),
-                        const SizedBox(width: 8),
-                        _buildSignOutButton(),
-                        const SizedBox(width: 8),
-                        _stageChip(),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-                      child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 220),
-                        // Keying on `_stage` (not the rebuilt subtree
-                        // itself) means a provider invalidation that leaves
-                        // the stage unchanged updates this subtree in place
-                        // instead of cross-fading — avoiding a transition
-                        // mid-dispose while a provider it depends on is also
-                        // being torn down/rebuilt.
-                        child: KeyedSubtree(
-                          key: ValueKey(_stage),
-                          child: _buildBody(subjectsAsync),
-                        ),
                       ),
-                    ),
-                  ),
-                  // Real, focusable controls. Under TalkBack the custom
-                  // gestures below cannot be relied on — TalkBack consumes
-                  // swipes for its own navigation — so every action the
-                  // gestures offer also exists here as a labelled button the
-                  // student reaches by the standard swipe-to-next-item and
-                  // activates with the standard double-tap they already use
-                  // on every other app.
-                  if (AccessibilityMode.of(context).needsExplicitControls)
-                    _buildAccessibleControls(),
-                  // The footer teaches the gesture set. Under a screen reader
-                  // those gestures do not apply (TalkBack owns them) and the
-                  // buttons above are self-describing, so the footer would be
-                  // misleading clutter competing for scarce vertical space.
-                  if (!AccessibilityMode.of(context).needsExplicitControls)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 14,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.82),
-                        borderRadius: BorderRadius.circular(18),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.06),
-                            blurRadius: 16,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      child: Text(
-                        _footerHint(),
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF355CA8),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
           ),
         ),
       ),
@@ -2370,6 +2386,8 @@ class _StudentLearningHubScreenState
 
     switch (_stage) {
       case LearningStage.subjects:
+        add('Join class', 'Enter your teacher code to receive subjects',
+            Icons.group_add_rounded, _openJoinClassFlow);
         add('Previous subject', 'Moves back one subject',
             Icons.chevron_left_rounded, _onSwipeLeft);
         add('Next subject', 'Moves forward one subject',
@@ -2386,11 +2404,14 @@ class _StudentLearningHubScreenState
             Icons.menu_book_rounded, _onDoubleTap);
         break;
       case LearningStage.lesson:
-        add(_lessonPlaying ? 'Pause lesson' : 'Play lesson',
+        add(
+            _lessonPlaying ? 'Pause lesson' : 'Play lesson',
             _lessonPlaying ? 'Stops reading' : 'Reads the lesson aloud',
             _lessonPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
             _toggleLessonPlayback);
-        add('Read slower', 'Lowers the reading speed',
+        add(
+            'Read slower',
+            'Lowers the reading speed',
             Icons.slow_motion_video_rounded,
             () => unawaited(_changeSpeechRate(slower: true)));
         add('Read faster', 'Raises the reading speed', Icons.speed_rounded,
@@ -2429,7 +2450,7 @@ class _StudentLearningHubScreenState
     add('My progress', 'Hear how much you have completed',
         Icons.insights_rounded, _openProgress);
     add('Sign out', 'Return to student login and choose a different student',
-      Icons.logout_rounded, () => unawaited(_signOutAndLeave()));
+        Icons.logout_rounded, () => unawaited(_signOutAndLeave()));
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
@@ -2590,8 +2611,7 @@ class _StudentLearningHubScreenState
                   const [];
           if (topics.isNotEmpty) {
             final topic = topics[_topicIndex.clamp(0, topics.length - 1)];
-            final lesson =
-                ref.watch(topicLessonProvider(topic.id)).valueOrNull;
+            final lesson = ref.watch(topicLessonProvider(topic.id)).valueOrNull;
             if (lesson != null) {
               ref.watch(lessonQuestionsProvider(lesson.id));
             }
