@@ -83,7 +83,7 @@ class _TeacherSubjectScreenState extends ConsumerState<TeacherSubjectScreen> {
                 topic: topics[index],
                 onDelete: () => _confirmDeleteTopic(topics[index]),
                 onNavigateToQuestions: (lessonId) => context.pushNamed(
-                  'teacherQuestions',
+                  'teacherReview',
                   pathParameters: {'lessonId': lessonId.toString()},
                 ),
                 onNavigateToUpload: (topicId) => context.pushNamed(

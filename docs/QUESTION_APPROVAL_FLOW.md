@@ -51,6 +51,14 @@ content is synchronized from approved backend content, not from the teacher's
 unapproved local cache. If synchronization fails, the app must not convert a
 pending question into a student-visible question.
 
+## Teacher review entry point
+
+For a cloud-linked teacher, the only normal review screen is **Review
+questions** after a lesson upload. Its approve, edit, and delete actions call
+the backend, and **Done** returns to the teacher dashboard. The older local
+review screen remains only as an offline fallback when a lesson could not be
+shared online; it is no longer linked from the normal teacher subject flow.
+
 ## Session and class-code persistence
 
 Teacher profiles are stored in the local Drift database. The signed-in

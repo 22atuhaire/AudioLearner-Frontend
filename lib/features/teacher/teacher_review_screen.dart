@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../shared/services/providers.dart';
 import '../../shared/services/teacher_review_service.dart';
@@ -254,13 +255,26 @@ class _TeacherReviewScreenState extends ConsumerState<TeacherReviewScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Review questions'),
+        leading: IconButton(
+          tooltip: 'Back to teacher dashboard',
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.go('/teacher/dashboard'),
+        ),
         actions: [
-          if (!_loading && _error == null && _questions.isNotEmpty)
+          if (!_loading && _error == null && _questions.isNotEmpty) ...[
             TextButton(
               onPressed: _approveAll,
               child: const Text('Approve all',
                   style: TextStyle(color: Colors.white)),
             ),
+            TextButton(
+              onPressed: () => context.go('/teacher/dashboard'),
+              child: const Text(
+                'Done',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
         ],
       ),
       body: _loading
