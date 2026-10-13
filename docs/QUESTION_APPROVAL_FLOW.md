@@ -63,9 +63,14 @@ last signed-in teacher directly to the dashboard.
 
 Class codes belong to the backend database that created them. The class
 teacher, subject teacher, and student must use the same
-`BACKEND_BASE_URL`; a code created on another Render service or database will
-correctly be rejected. The app trims, uppercases, and normalizes student codes
-before sending them.
+`BACKEND_BASE_URL`; a code created on another service or database will
+correctly be rejected. The current default is
+`https://hundreds-spine-paso-fragrance.trycloudflare.com`. The app trims,
+uppercases, and normalizes student codes before sending them.
+
+This is a Cloudflare Tunnel address, so it may change or stop working when
+the tunnel is restarted. It can be overridden at build time with
+`--dart-define=BACKEND_BASE_URL=...`.
 
 After a successful student registration, the client retries cloud
 synchronization for a short bounded period because a newly uploaded note may

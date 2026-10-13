@@ -23,7 +23,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// screen — so the instance is awake before a student joins a class or syncs.
 const String kDefaultBackendBaseUrl = String.fromEnvironment(
   'BACKEND_BASE_URL',
-  defaultValue: 'https://visiolearn-backend-2.onrender.com',
+  defaultValue: 'https://hundreds-spine-paso-fragrance.trycloudflare.com',
 );
 
 class BackendApiException implements Exception {
