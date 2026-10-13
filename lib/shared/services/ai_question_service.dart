@@ -290,6 +290,14 @@ class AiQuestionService {
     'ninety',
   };
 
+  static const Set<String> _vagueSubjects = {
+    'answer',
+    'thing',
+    'things',
+    'name',
+    'names',
+  };
+
   /// Generates MCQs from [lessonText] — between [_minQuestions] and
   /// [_maxQuestionsCap], scaled to how much the note covers. Empty when the
   /// text is blank or has too few usable sentences.
@@ -483,7 +491,6 @@ class AiQuestionService {
         _clauseLeadIns.contains(firstWord)) {
       return null;
     }
-
     final correct = _shortPhrase(m.group(4)!, 12);
     if (!_isSpeakableOption(correct)) return null;
 
@@ -504,8 +511,8 @@ class AiQuestionService {
     if (distractors.length < 3) return null;
 
     return _assemble(
-      questionText:
-          'When $verb ${_shortPhrase(subject, 8)} ${_shortPhrase(predicate, 8)}?',
+      questionText: 'When $verb ${_questionSubject(_shortPhrase(subject, 8))} '
+          '${_shortPhrase(predicate, 8)}?',
       correct: correct,
       wrongs: distractors,
       explanation: 'From your lesson: ${_truncate(sentence, 200)}',
@@ -578,6 +585,15 @@ class AiQuestionService {
     final predicate = _stripTrailingDot(
       sentence.substring(idx + verb.length),
     ).trim();
+    // These are relational fragments, not standalone teaching concepts.
+    // Without this guard, statements such as "Both names are written in
+    // italics" become the unhelpful question "What are both names?".
+    if (RegExp(
+      r'^(the\s+)?(?:both|first|second|former|latter|other|two)\b',
+      caseSensitive: false,
+    ).hasMatch(subject)) {
+      return null;
+    }
     final lower = predicate.toLowerCase();
     final isSuperlative = lower.startsWith('the ') &&
         RegExp(r'\b(highest|largest|longest|deepest|oldest)\b').hasMatch(lower);
@@ -611,7 +627,10 @@ class AiQuestionService {
 
     final featurePhrase = predicate
         .replaceFirst(RegExp(r'^an?\s+', caseSensitive: false), '')
-        .replaceFirst(RegExp(r'\s+that is\s+', caseSensitive: false), ' ');
+        .replaceFirst(
+          RegExp(r'\s+that is\s+', caseSensitive: false),
+          ' is ',
+        );
     final questionText = isNamedFeature
         ? 'Which $featurePhrase?'
         : (lower.contains('mountain')
@@ -668,6 +687,15 @@ class AiQuestionService {
         _clauseLeadIns.contains(firstWord)) {
       return null;
     }
+    // These are relational fragments, not standalone teaching concepts.
+    // Without this guard, statements such as "Both names are written in
+    // italics" become the unhelpful question "What are both names?".
+    if (RegExp(
+      r'^(the\s+)?(?:both|first|second|former|latter|other|two)\b',
+      caseSensitive: false,
+    ).hasMatch(subject.trim())) {
+      return null;
+    }
     // The subject must contain a real content word, not be made only of
     // stopwords / question words / numbers.
     final hasContentWord = subjWords.any((w) {
@@ -677,6 +705,9 @@ class AiQuestionService {
           !_interrogatives.contains(t);
     });
     if (!hasContentWord) return null;
+    final subjectKey =
+        subject.toLowerCase().replaceFirst(RegExp(r'^the\s+'), '').trim();
+    if (_vagueSubjects.contains(subjectKey)) return null;
 
     final passiveTarget = RegExp(
       r'^immunised against\s+(.+)$',
@@ -687,15 +718,21 @@ class AiQuestionService {
     );
     if (!_isSpeakableOption(correct)) return null;
 
+    final classification = RegExp(
+      r'^(?:divided|classified|grouped|categorised|categorized)\s+into\b',
+      caseSensitive: false,
+    ).hasMatch(rawPredicate.trim());
     final distractors =
         _pickLengthMatched(correct, _predicatePool(sentence, all), 3, rng);
     if (distractors.length < 3) return null;
 
-    final questionText = passiveTarget == null
-        ? 'What ${verb.trim()} '
-            '${_questionSubject(_shortPhrase(subject, 8))}?'
-        : 'What are ${_questionSubject(_shortPhrase(subject, 8))} '
-            'immunised against?';
+    final questionText = classification
+        ? 'How are ${_questionSubject(_shortPhrase(subject, 8))} classified?'
+        : passiveTarget == null
+            ? 'What ${verb.trim()} '
+                '${_questionSubject(_shortPhrase(subject, 8))}?'
+            : 'What are ${_questionSubject(_shortPhrase(subject, 8))} '
+                'immunised against?';
     return _assemble(
       questionText: questionText,
       correct: correct,
@@ -755,11 +792,23 @@ class AiQuestionService {
 
     present.sort((a, b) => b.length.compareTo(a.length));
     final answer = present.first;
+    // A cloze is only useful when the missing term is a recognisable
+    // curriculum term or proper name. Lowercase word-frequency terms such as
+    // "things", "anything", and "answer" produce grammatical-looking but
+    // educationally empty questions.
+    final isNamedOrLabelledTerm = RegExp(r'^[A-Z]').hasMatch(answer) ||
+        answer.contains(RegExp(r'[A-Z]{2,}'));
+    if (!isNamedOrLabelledTerm) return null;
 
     final blanked = sentence.replaceFirst(
         RegExp('\\b${RegExp.escape(answer)}\\b', caseSensitive: false),
         'blank');
     if (!blanked.toLowerCase().contains('blank')) return null;
+    if (blanked.trimLeft().toLowerCase().startsWith('blank ') ||
+        RegExp(r'\b(is|are|was|were)\s+blank\b', caseSensitive: false)
+            .hasMatch(blanked)) {
+      return null;
+    }
 
     final others =
         keyTerms.where((t) => t.toLowerCase() != answer.toLowerCase()).toList();

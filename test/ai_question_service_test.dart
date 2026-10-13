@@ -144,6 +144,41 @@ Following BODMAS, addition and subtraction are done from left to right.
     });
   });
 
+  group('with biology classification notes', () {
+    const note = '''
+Scientific names are used to identify organisms throughout the world.
+The first name is the genus and the second name is the species.
+Both names are written in italics or underlined.
+Animals are divided into two main groups: invertebrates and vertebrates.
+A dichotomous key is a tool used to identify organisms.
+Plants are grouped into flowering and non-flowering plants.
+''';
+
+    test('does not create questions from relational fragments', () {
+      final questions = service.generateQuestions(note);
+      expect(
+        questions.any((q) =>
+            q.questionText.toLowerCase() == 'what are both names?' ||
+            q.questionText.toLowerCase() == 'what is the first name?'),
+        isFalse,
+      );
+    });
+
+    test('asks classification statements as how questions', () {
+      final questions = service.generateQuestions(note);
+      expect(
+        questions.any((q) =>
+            q.questionText.toLowerCase() == 'how are animals classified?'),
+        isTrue,
+      );
+      expect(
+        questions.any((q) =>
+            q.questionText.toLowerCase() == 'how are plants classified?'),
+        isTrue,
+      );
+    });
+  });
+
   // Regression for the defect the evaluation harness (eval/) exposed: the
   // generator walked sentences in reading order and stopped at five, so a
   // multi-section note got five questions about its FIRST section and nothing
