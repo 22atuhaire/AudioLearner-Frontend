@@ -1254,7 +1254,10 @@ class BackendApiService {
         'email': email.trim(),
         'full_name': fullName.trim(),
         'password': password,
-        'student_code': studentCode.trim(),
+        'student_code': studentCode.trim().toUpperCase().replaceAll(
+              RegExp(r'\s+'),
+              '',
+            ),
       },
     );
     if (!_isSuccess(statusCode) || data is! Map<String, dynamic>) {

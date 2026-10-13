@@ -504,6 +504,7 @@ class _StudentLearningHubScreenState
     // before subject matching so "join my class" cannot be mistaken for a
     // subject name or navigation command.
     if (has([
+      'join',
       'join class',
       'join my class',
       'join a class',
@@ -2123,7 +2124,11 @@ class _StudentLearningHubScreenState
     HapticFeedback.selectionClick();
     switch (_stage) {
       case LearningStage.subjects:
-        _openCurrentSubject();
+        if (_subjects().isEmpty) {
+          _openJoinClassFlow();
+        } else {
+          _openCurrentSubject();
+        }
         break;
       case LearningStage.topics:
         _openCurrentTopic();

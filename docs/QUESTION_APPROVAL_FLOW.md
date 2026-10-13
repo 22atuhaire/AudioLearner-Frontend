@@ -50,3 +50,24 @@ The online review screen saves edits and approval to the backend. Student
 content is synchronized from approved backend content, not from the teacher's
 unapproved local cache. If synchronization fails, the app must not convert a
 pending question into a student-visible question.
+
+## Session and class-code persistence
+
+Teacher profiles are stored in the local Drift database. The signed-in
+teacher id is stored in `SharedPreferences`, while the backend email,
+password, tokens, and teacher/student codes are stored in secure storage.
+Normal `flutter run`, hot reload, and hot restart do not erase these records.
+Uninstalling the app, clearing app data, using a new emulator/device, or
+manually clearing storage does erase them. On startup, the app restores the
+last signed-in teacher directly to the dashboard.
+
+Class codes belong to the backend database that created them. The class
+teacher, subject teacher, and student must use the same
+`BACKEND_BASE_URL`; a code created on another Render service or database will
+correctly be rejected. The app trims, uppercases, and normalizes student codes
+before sending them.
+
+For blind students, joining is available by saying **“join”** or
+**“join class”**, using the accessible **Join class** button, or double-tapping
+on the empty subjects screen. A double tap on an available subject still opens
+that subject.

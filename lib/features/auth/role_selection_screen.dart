@@ -50,6 +50,7 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
       // "Hey Google, open AudioLearner" genuinely useful: the student lands
       // in their lessons, speaking, instead of on a menu.
       if (await _resumeReturningStudent()) return;
+      if (await _resumeReturningTeacher()) return;
 
       await Future<void>.delayed(const Duration(milliseconds: 500));
       if (!mounted) return;
@@ -63,9 +64,48 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
         AccessibilityMode.announce(welcome);
         return;
       }
+
       await ref.read(ttsServiceProvider).speakAndWait(welcome);
       if (mounted) unawaited(_listenForRole());
     });
+  }
+
+  /// Sends a previously signed-in teacher straight to the dashboard.
+  ///
+  /// Teacher accounts use the same durable Drift row and persisted signed-in
+  /// id as the teacher access screen. Checking here avoids making a returning
+  /// teacher repeat account creation just because the app was launched from
+  /// the role-selection route.
+  Future<bool> _resumeReturningTeacher() async {
+    try {
+      final link = ref.read(backendLinkServiceProvider);
+      final teacherId = await link.getSignedInTeacherId();
+      if (teacherId == null || !mounted) return false;
+
+      final teacher = await ref
+          .read(appDatabaseProvider)
+          .teacherDao
+          .getTeacherById(teacherId);
+      if (teacher == null || !mounted) {
+        if (teacher == null) await link.clearSignedInTeacher();
+        return false;
+      }
+
+      _navigated = true;
+      final greeting =
+          'Welcome back, ${teacher.name}. Opening your teacher dashboard.';
+      if (AccessibilityMode.isScreenReaderActive) {
+        AccessibilityMode.announce(greeting);
+      } else {
+        unawaited(ref.read(ttsServiceProvider).speak(greeting));
+      }
+      ref.read(currentTeacherProvider.notifier).state = teacher;
+      if (!mounted) return false;
+      context.go('/teacher/dashboard');
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Sends a previously signed-in student straight to the learning hub.
@@ -81,8 +121,10 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
 
       // Confirm the row still exists — app data may have been cleared, and
       // resuming into a hub with no student would strand them silently.
-      final student =
-          await ref.read(appDatabaseProvider).studentDao.getStudentById(studentId);
+      final student = await ref
+          .read(appDatabaseProvider)
+          .studentDao
+          .getStudentById(studentId);
       if (student == null || !mounted) return false;
 
       _navigated = true;
