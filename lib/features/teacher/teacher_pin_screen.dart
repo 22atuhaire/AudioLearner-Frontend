@@ -291,13 +291,11 @@ class _TeacherPinScreenState extends ConsumerState<TeacherPinScreen> {
           onPressed: _busy
               ? null
               : () => setState(() {
-                    _signInMode = joining;
+                    _signInMode = true;
                     _joinExistingMode = false;
                     _error = '';
                   }),
-          child: Text(joining
-              ? 'Already have an account? Sign in'
-              : 'Already have an account? Sign in'),
+          child: const Text('Already have an account? Sign in'),
         ),
         TextButton(
           onPressed: _busy
