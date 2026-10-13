@@ -289,6 +289,38 @@ class _StudentLearningHubScreenState
         if (mounted && _stage == LearningStage.subjects) {
           _announceCurrentState(force: true);
         }
+      } else if (mounted) {
+        // A newly uploaded note may still be processing on the backend when
+        // the student joins. Retry a few times so the student does not have to
+        // close and reopen the app just to discover the lesson.
+        for (final delay in const [
+          Duration(seconds: 3),
+          Duration(seconds: 7),
+          Duration(seconds: 12),
+        ]) {
+          await Future<void>.delayed(delay);
+          if (!mounted) return;
+          final retryAdded = await link
+              .syncCloudContentForStudent(
+                localStudentId: student.id,
+                db: db,
+              )
+              .timeout(const Duration(seconds: 25), onTimeout: () => 0);
+          if (retryAdded > 0) {
+            ref.invalidate(allSubjectsProvider);
+            await ref.read(allSubjectsProvider.future);
+            if (!mounted) return;
+            await _speak(
+              retryAdded == 1
+                  ? 'One new lesson from your class is ready.'
+                  : '$retryAdded new lessons from your class are ready.',
+            );
+            if (mounted && _stage == LearningStage.subjects) {
+              _announceCurrentState(force: true);
+            }
+            break;
+          }
+        }
       }
     } catch (_) {
       if (mounted) setState(() => _cloudSyncing = false);
@@ -3250,82 +3282,94 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
       onDoubleTap: _handleDoubleTap,
       child: AlertDialog(
         title: const Text('Join your class'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (_stage == _JoinStage.loading ||
-                  _stage == _JoinStage.linking) ...[
-                const Center(child: CircularProgressIndicator()),
-                const SizedBox(height: 14),
-              ],
-              Text(
-                _statusText,
-                style: const TextStyle(fontSize: 16, height: 1.4),
-              ),
-              if (_stage == _JoinStage.confirmName ||
-                  _stage == _JoinStage.confirmCode) ...[
-                const SizedBox(height: 14),
-                Text(
-                  'Tap once: yes, that\'s right.   Tap twice: try again.',
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-                ),
-              ],
-              // Typed fallback: voice capture of a spelled code can fail in a
-              // noisy room or without a recognizer. A sighted helper types the
-              // code exactly as the teacher shared it (e.g. SC-MFQ8).
-              if (_stage == _JoinStage.askCode ||
-                  _stage == _JoinStage.confirmCode ||
-                  _stage == _JoinStage.error) ...[
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _codeController,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: const InputDecoration(
-                    labelText: 'Or type the class code',
-                    hintText: 'e.g. SC-4B7K',
-                    border: OutlineInputBorder(),
-                    isDense: true,
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.52,
+          ),
+          child: SingleChildScrollView(
+            child: SizedBox(
+              width: double.maxFinite,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_stage == _JoinStage.loading ||
+                      _stage == _JoinStage.linking) ...[
+                    const Center(child: CircularProgressIndicator()),
+                    const SizedBox(height: 14),
+                  ],
+                  Text(
+                    _statusText,
+                    style: const TextStyle(fontSize: 16, height: 1.4),
                   ),
-                  onSubmitted: (_) => _useTypedCode(),
-                ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: ElevatedButton(
-                    onPressed: _useTypedCode,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1A56DB),
-                      foregroundColor: Colors.white,
+                  if (_stage == _JoinStage.confirmName ||
+                      _stage == _JoinStage.confirmCode) ...[
+                    const SizedBox(height: 14),
+                    Text(
+                      'Tap once: yes, that\'s right.   Tap twice: try again.',
+                      style:
+                          TextStyle(fontSize: 13, color: Colors.grey.shade600),
                     ),
-                    child: const Text('Join with typed code'),
-                  ),
-                ),
-              ],
-              if (_stage == _JoinStage.intro) ...[
-                const SizedBox(height: 14),
-                Text(
-                  'Listening for your name…',
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-                ),
-              ],
-              if (_stage == _JoinStage.success && _existingLink != null) ...[
-                const SizedBox(height: 14),
-                Text(
-                  'Class joined. You can close this and keep learning.',
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-                ),
-              ],
-              if (_stage == _JoinStage.error) ...[
-                const SizedBox(height: 14),
-                Text(
-                  'Tap once to try again.',
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-                ),
-              ],
-            ],
+                  ],
+                  // Typed fallback: voice capture of a spelled code can fail in a
+                  // noisy room or without a recognizer. A sighted helper types the
+                  // code exactly as the teacher shared it (e.g. SC-MFQ8).
+                  if (_stage == _JoinStage.askCode ||
+                      _stage == _JoinStage.confirmCode ||
+                      _stage == _JoinStage.error) ...[
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: _codeController,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: const InputDecoration(
+                        labelText: 'Or type the class code',
+                        hintText: 'e.g. SC-4B7K',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      onSubmitted: (_) => _useTypedCode(),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: ElevatedButton(
+                        onPressed: _useTypedCode,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1A56DB),
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('Join with typed code'),
+                      ),
+                    ),
+                  ],
+                  if (_stage == _JoinStage.intro) ...[
+                    const SizedBox(height: 14),
+                    Text(
+                      'Listening for your name…',
+                      style:
+                          TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                    ),
+                  ],
+                  if (_stage == _JoinStage.success &&
+                      _existingLink != null) ...[
+                    const SizedBox(height: 14),
+                    Text(
+                      'Class joined. You can close this and keep learning.',
+                      style:
+                          TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                    ),
+                  ],
+                  if (_stage == _JoinStage.error) ...[
+                    const SizedBox(height: 14),
+                    Text(
+                      'Tap once to try again.',
+                      style:
+                          TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
         ),
         actions: _buildActions(context),

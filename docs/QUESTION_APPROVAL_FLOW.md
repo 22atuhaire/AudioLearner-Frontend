@@ -67,6 +67,14 @@ teacher, subject teacher, and student must use the same
 correctly be rejected. The app trims, uppercases, and normalizes student codes
 before sending them.
 
+After a successful student registration, the client retries cloud
+synchronization for a short bounded period because a newly uploaded note may
+still be `PENDING_PROCESSING`. A note is only materialized for students once
+it is `READY` and contains approved question artefacts. If the teacher has
+not approved the questions, the student code can be accepted while the
+subject remains intentionally hidden; this is an approval-state issue, not a
+failed registration.
+
 For blind students, joining is available by saying **“join”** or
 **“join class”**, using the accessible **Join class** button, or double-tapping
 on the empty subjects screen. A double tap on an available subject still opens
