@@ -41,12 +41,14 @@ class _TeacherPinScreenState extends ConsumerState<TeacherPinScreen> {
 
   bool _loading = true; // checking for an existing signed-in session
   bool _signInMode = false; // false = create account, true = sign in
+  bool _joinExistingMode = false;
   bool _busy = false;
   String _error = '';
 
   final _nameController = TextEditingController();
   final _classController = TextEditingController();
   final _subjectController = TextEditingController();
+  final _teacherCodeController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
@@ -61,6 +63,7 @@ class _TeacherPinScreenState extends ConsumerState<TeacherPinScreen> {
     _nameController.dispose();
     _classController.dispose();
     _subjectController.dispose();
+    _teacherCodeController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -97,12 +100,19 @@ class _TeacherPinScreenState extends ConsumerState<TeacherPinScreen> {
     final name = _nameController.text.trim();
     final className = _classController.text.trim();
     final subject = _subjectController.text.trim();
+    final teacherCode = _teacherCodeController.text.trim().toUpperCase();
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
     if (name.isEmpty) return _fail('Enter your full name.');
-    if (className.isEmpty) return _fail('Enter your class name.');
+    if (!_joinExistingMode && className.isEmpty) {
+      return _fail('Enter your class name.');
+    }
     if (subject.isEmpty) return _fail('Enter the subject you teach.');
+    if (_joinExistingMode &&
+        !RegExp(r'^TC-[A-Z0-9]{4}$').hasMatch(teacherCode)) {
+      return _fail('Enter the class teacher code, for example TC-AB12.');
+    }
     if (!email.contains('@') || email.length < 5) {
       return _fail('Enter a valid email.');
     }
@@ -144,7 +154,8 @@ class _TeacherPinScreenState extends ConsumerState<TeacherPinScreen> {
         email: email,
         password: password,
         subjectName: subject,
-        className: className,
+        className: _joinExistingMode ? null : className,
+        joinTeacherCode: _joinExistingMode ? teacherCode : null,
       );
       await link.setSignedInTeacher(teacherId);
 
@@ -218,32 +229,44 @@ class _TeacherPinScreenState extends ConsumerState<TeacherPinScreen> {
   }
 
   Widget _buildCreate() {
+    final joining = _joinExistingMode;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Icon(Icons.person_add_rounded,
-            size: 56, color: Color(0xFF1A56DB)),
+        Icon(joining ? Icons.group_add_rounded : Icons.person_add_rounded,
+            size: 56, color: const Color(0xFF1A56DB)),
         const SizedBox(height: 12),
-        const Text(
-          'Create your account',
+        Text(
+          joining ? 'Join an existing class' : 'Create your account',
           textAlign: TextAlign.center,
-          style: TextStyle(
+          style: const TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
               color: Color(0xFF1A56DB)),
         ),
         const SizedBox(height: 6),
-        const Text(
-          'Your email and password are your account — they back up your notes '
-          'and let students join your class.',
+        Text(
+          joining
+              ? 'Use the teacher code from the class teacher. You will join '
+                  'their class as a subject teacher.'
+              : 'Your email and password are your account — they back up '
+                  'your notes and let students join your class.',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 13, color: Colors.grey),
+          style: const TextStyle(fontSize: 13, color: Colors.grey),
         ),
         const SizedBox(height: 24),
         _field(_nameController, 'Your full name', Icons.person_outline),
         const SizedBox(height: 14),
-        _field(_classController, 'Class name (e.g. Primary 5)',
-            Icons.groups_outlined),
+        if (joining)
+          _field(
+            _teacherCodeController,
+            'Class teacher code (e.g. TC-AB12)',
+            Icons.key_rounded,
+            helper: 'Ask the Senior Two class teacher for their teacher code.',
+          )
+        else
+          _field(_classController, 'Class name (e.g. Primary 5)',
+              Icons.groups_outlined),
         const SizedBox(height: 14),
         _field(_subjectController, 'Subject you teach (e.g. Biology)',
             Icons.book_outlined),
@@ -260,16 +283,33 @@ class _TeacherPinScreenState extends ConsumerState<TeacherPinScreen> {
               style: const TextStyle(color: Color(0xFFDC2626), fontSize: 13)),
         ],
         const SizedBox(height: 24),
-        _primaryButton('Create account', _handleCreate),
+        _primaryButton(
+            joining ? 'Join class and create account' : 'Create account',
+            _handleCreate),
         const SizedBox(height: 10),
         TextButton(
           onPressed: _busy
               ? null
               : () => setState(() {
-                    _signInMode = true;
+                    _signInMode = joining;
+                    _joinExistingMode = false;
                     _error = '';
                   }),
-          child: const Text('Already have an account? Sign in'),
+          child: Text(joining
+              ? 'Already have an account? Sign in'
+              : 'Already have an account? Sign in'),
+        ),
+        TextButton(
+          onPressed: _busy
+              ? null
+              : () => setState(() {
+                    _joinExistingMode = !joining;
+                    _signInMode = false;
+                    _error = '';
+                  }),
+          child: Text(joining
+              ? 'Need your own class? Create a class instead'
+              : 'Are you joining a class? Use a teacher code'),
         ),
       ],
     );
@@ -315,6 +355,7 @@ class _TeacherPinScreenState extends ConsumerState<TeacherPinScreen> {
               ? null
               : () => setState(() {
                     _signInMode = false;
+                    _joinExistingMode = false;
                     _error = '';
                   }),
           child: const Text('New here? Create an account'),
@@ -335,10 +376,9 @@ class _TeacherPinScreenState extends ConsumerState<TeacherPinScreen> {
       controller: controller,
       obscureText: obscure,
       keyboardType: keyboard,
-      textCapitalization:
-          (keyboard == TextInputType.emailAddress || obscure)
-              ? TextCapitalization.none
-              : TextCapitalization.words,
+      textCapitalization: (keyboard == TextInputType.emailAddress || obscure)
+          ? TextCapitalization.none
+          : TextCapitalization.words,
       decoration: InputDecoration(
         labelText: label,
         helperText: helper,
@@ -358,7 +398,8 @@ class _TeacherPinScreenState extends ConsumerState<TeacherPinScreen> {
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF1A56DB),
           foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
         onPressed: _busy ? null : () => onPressed(),
         child: _busy
@@ -409,8 +450,9 @@ class _ClassCodeDialogState extends ConsumerState<_ClassCodeDialog> {
   }
 
   Future<void> _load() async {
-    final info =
-        await ref.read(backendLinkServiceProvider).getTeacherLink(widget.teacher.id);
+    final info = await ref
+        .read(backendLinkServiceProvider)
+        .getTeacherLink(widget.teacher.id);
     if (!mounted) return;
     setState(() {
       _teacherCode = info?.teacherCode;
