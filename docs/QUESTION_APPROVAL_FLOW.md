@@ -19,6 +19,20 @@ flowchart TD
     I --> J[Student sees latest approved wording and answers]
 ```
 
+## Shared-device identity boundary
+
+The student hub does not use the unrestricted local subject list. It first
+requires an active student class link, then lists only subjects that contain
+at least one approved local question (`teacher`) or synchronized server
+question (`cloud`). This prevents a student who takes over a teacher's phone
+from seeing the teacher's locally created subjects before joining a class.
+The **Join class** action remains available when the filtered list is empty.
+
+If a teacher's online upload fails, the lesson and its questions remain
+available in the teacher's local review screen as `ai_pending`. The app
+reports that it was saved locally but not shared online; students cannot see
+that content until the teacher approves it and the online sharing succeeds.
+
 ## Shared-device rule
 
 The local question table uses `source: ai_pending` for generated questions

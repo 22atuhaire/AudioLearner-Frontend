@@ -479,6 +479,7 @@ class _TeacherUploadScreenState extends ConsumerState<TeacherUploadScreen> {
       // the class link. A silent local-only save reads as "sync is broken".
       final teacher = ref.read(currentTeacherProvider);
       var cloudLinked = false;
+      var cloudShareFailed = false;
       String? remoteNoteId;
       if (teacher != null) {
         final link = await ref
@@ -501,29 +502,32 @@ class _TeacherUploadScreenState extends ConsumerState<TeacherUploadScreen> {
                   questions: aiQuestions,
                 );
         if (cloudLinked && remoteNoteId == null) {
-          throw Exception(
-            'The lesson could not be shared with the class. '
-            'Nothing is available to students yet.',
-          );
+          cloudShareFailed = true;
         }
       }
 
       setState(() {
         _saving = false;
         _questionsGenerated = aiQuestions.length;
-        _statusMessage = cloudLinked
-            ? '$_questionsGenerated questions generated. '
-                'Sharing to your class online in the background. Redirecting…'
-            : '$_questionsGenerated questions generated. '
-                'Saved on this phone only — connect your class to share '
-                'with students on other devices. Redirecting…';
+        _statusMessage = cloudShareFailed
+            ? '$_questionsGenerated questions generated and saved on this '
+                'phone, but sharing online failed. Review and approve them '
+                'here; students will not see them until they are shared.'
+            : cloudLinked
+                ? '$_questionsGenerated questions generated. '
+                    'Sharing to your class online in the background. Redirecting…'
+                : '$_questionsGenerated questions generated. '
+                    'Saved on this phone only — connect your class to share '
+                    'with students on other devices. Redirecting…';
       });
 
       // ── 4. Navigate to questions review after a brief pause ───────────
       await Future.delayed(const Duration(seconds: 1));
       if (mounted) {
         context.pushNamed(
-          cloudLinked ? 'teacherReview' : 'teacherQuestions',
+          cloudLinked && !cloudShareFailed
+              ? 'teacherReview'
+              : 'teacherQuestions',
           pathParameters: {
             'lessonId': lessonId.toString(),
           },

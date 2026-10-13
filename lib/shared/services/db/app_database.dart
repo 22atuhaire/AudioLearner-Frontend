@@ -285,12 +285,29 @@ class SubjectDao extends DatabaseAccessor<AppDatabase> with _$SubjectDaoMixin {
   Future<List<Subject>> getAllSubjects() =>
       (select(subjectsTable)..orderBy([(t) => OrderingTerm.asc(t.name)])).get();
 
+  /// Return subjects that have at least one question a student is allowed to
+  /// see. Pending AI questions are intentionally excluded.
+  Future<List<Subject>> getStudentVisibleSubjects() async {
+    final rows = await customSelect(
+      '''
+      SELECT DISTINCT s.*
+      FROM subjects s
+      JOIN topics t ON t.subject_id = s.id
+      JOIN lessons l ON l.topic_id = t.id
+      JOIN questions q ON q.lesson_id = l.id
+      WHERE q.source IN ('teacher', 'cloud')
+      ORDER BY s.name COLLATE NOCASE ASC
+      ''',
+      readsFrom: {subjectsTable},
+    ).get();
+    return rows.map((row) => subjectsTable.map(row.data)).toList();
+  }
+
   /// Return the subject with the given [id], or `null` if it doesn't exist.
   /// Used by the backend bridge to resolve which cloud subject a local
   /// upload belongs to.
   Future<Subject?> getSubjectById(int id) =>
-      (select(subjectsTable)..where((t) => t.id.equals(id)))
-          .getSingleOrNull();
+      (select(subjectsTable)..where((t) => t.id.equals(id))).getSingleOrNull();
 
   /// Delete the subject with the given [id] and return the number of rows deleted.
   Future<int> deleteSubject(int id) =>

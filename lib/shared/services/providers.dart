@@ -94,7 +94,16 @@ final teacherSubjectsProvider =
 final allSubjectsProvider =
     FutureProvider.autoDispose<List<Subject>>((ref) async {
   final db = ref.watch(appDatabaseProvider);
-  return db.subjectDao.getAllSubjects();
+  final student = await db.studentDao.getStudent();
+  if (student == null) return [];
+
+  // A shared device must not expose a teacher's local subjects to a student.
+  // The student must first be linked to a backend class.
+  final studentLink =
+      await ref.read(backendLinkServiceProvider).getStudentLink(student.id);
+  if (studentLink == null) return [];
+
+  return db.subjectDao.getStudentVisibleSubjects();
 });
 
 // Topics for a subject (family by subjectId)
