@@ -23,7 +23,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// screen — so the instance is awake before a student joins a class or syncs.
 const String kDefaultBackendBaseUrl = String.fromEnvironment(
   'BACKEND_BASE_URL',
-  defaultValue: 'https://visiolearn-backend.onrender.com',
+  defaultValue: 'https://visiolearn-backend-2.onrender.com',
 );
 
 class BackendApiException implements Exception {
@@ -122,8 +122,7 @@ class BackendRegistrationResult {
   final String? studentCode;
   final String? teacherCode;
 
-  static String? _str(dynamic v) =>
-      (v == null) ? null : v.toString();
+  static String? _str(dynamic v) => (v == null) ? null : v.toString();
 
   factory BackendRegistrationResult.fromJson(Map<String, dynamic> json) {
     return BackendRegistrationResult(
@@ -260,8 +259,7 @@ class BackendNote {
       status: json['status']?.toString() ?? 'PENDING_PROCESSING',
       createdAt: json['created_at']?.toString() ?? '',
       description: json['description']?.toString(),
-      durationSeconds:
-          duration is int ? duration : int.tryParse('$duration'),
+      durationSeconds: duration is int ? duration : int.tryParse('$duration'),
       subjectId: json['subject_id']?.toString(),
       classId: json['class_id']?.toString(),
     );
@@ -1184,8 +1182,7 @@ class BackendApiService {
     );
     if (!_isSuccess(statusCode) || data is! Map<String, dynamic>) {
       throw BackendApiException(
-        _extractDetail(
-            data, 'Could not register the subject teacher account.'),
+        _extractDetail(data, 'Could not register the subject teacher account.'),
         statusCode: statusCode,
       );
     }
@@ -1374,7 +1371,8 @@ class BackendApiService {
     }
 
     try {
-      final streamed = await request.send().timeout(const Duration(seconds: 60));
+      final streamed =
+          await request.send().timeout(const Duration(seconds: 60));
       final raw = await streamed.stream.bytesToString();
       dynamic parsed;
       if (raw.isNotEmpty) {
