@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -28,6 +29,10 @@ class TtsService {
   bool _googleTtsInstalled = false;
   bool _usingGoogleTts = false;
   String? _activeEngine;
+
+  // Temporary performance measurement. Remove after the evaluation.
+  Stopwatch? _performanceLatencyStopwatch;
+  String? _performanceCommand;
 
   /// Completer used by [speakAndWait] to know when an utterance finishes.
   Completer<void>? _completionCompleter;
@@ -170,6 +175,18 @@ class TtsService {
     // ── Lifecycle handlers ───────────────────────────────────────
     _tts.setStartHandler(() {
       _speaking = true;
+      final stopwatch = _performanceLatencyStopwatch;
+      if (stopwatch != null && stopwatch.isRunning) {
+        stopwatch.stop();
+        debugPrint(
+          'PERF_AUDIO_LATENCY_MS=${stopwatch.elapsedMilliseconds} '
+          'command="${_performanceCommand ?? 'unknown'}" '
+          'engine=${_activeEngine ?? 'unknown'} '
+          'speechRate=${_speechRate.toStringAsFixed(2)}',
+        );
+        _performanceLatencyStopwatch = null;
+        _performanceCommand = null;
+      }
     });
 
     // Track the character offset of the word currently being spoken within
@@ -215,6 +232,22 @@ class TtsService {
     });
 
     _initialized = true;
+  }
+
+  /// Starts the temporary audio-latency measurement for one accepted command.
+  /// Remove after the performance evaluation.
+  void markPerformanceCommandHandled(String command) {
+    _performanceCommand = command;
+    _performanceLatencyStopwatch = Stopwatch()..start();
+  }
+
+  /// Cancels a temporary audio-latency measurement when a phrase was not a
+  /// recognized command.
+  /// Remove after the performance evaluation.
+  void clearPerformanceCommand() {
+    _performanceLatencyStopwatch?.stop();
+    _performanceLatencyStopwatch = null;
+    _performanceCommand = null;
   }
 
   Future<void> _configureAndroidEngine() async {

@@ -520,6 +520,16 @@ class _StudentLearningHubScreenState
   /// as a fallback. Called with both in-flight partials (instant response)
   /// and final results (safety net), so it must act ONLY on a clear match.
   bool _tryDispatchVoiceCommand(String heard) {
+    final tts = ref.read(ttsServiceProvider);
+    tts.markPerformanceCommandHandled(heard);
+    final handled = _dispatchVoiceCommand(heard);
+    if (!handled) {
+      tts.clearPerformanceCommand();
+    }
+    return handled;
+  }
+
+  bool _dispatchVoiceCommand(String heard) {
     if (!mounted) return false;
     final command = heard.toLowerCase().trim();
     if (command.isEmpty) return false;
@@ -732,25 +742,41 @@ class _StudentLearningHubScreenState
     if (!mounted || session != _voiceLoopSession) return;
 
     var handled = false;
+    var longestPartial = '';
+
+    void handleQuestion(String words) {
+      if (handled || session != _voiceLoopSession) return;
+      final question = words.trim();
+      if (question.isEmpty) return;
+      handled = true;
+      unawaited(stt.stopListening());
+      if (_isEcho(question)) {
+        unawaited(_announceAndListen(
+            'I did not catch that. Say play to keep listening, or ask again.'));
+      } else {
+        unawaited(_answerQuestion(question));
+      }
+    }
+
     stt.startListening(
-      listenFor: const Duration(seconds: 20),
-      pauseFor: const Duration(seconds: 6),
-      onResult: (words) {
-        if (handled || session != _voiceLoopSession) return;
-        handled = true;
-        unawaited(stt.stopListening());
-        if (_isEcho(words) || words.trim().isEmpty) {
-          unawaited(_announceAndListen(
-              'I did not catch that. Say play to keep listening, or ask again.'));
-        } else {
-          unawaited(_answerQuestion(words));
+      listenFor: const Duration(seconds: 30),
+      pauseFor: const Duration(seconds: 10),
+      onPartial: (words) {
+        final partial = words.trim();
+        if (partial.length > longestPartial.length) {
+          longestPartial = partial;
         }
       },
+      onResult: handleQuestion,
       onDone: () {
         if (handled || session != _voiceLoopSession) return;
-        handled = true;
-        unawaited(_announceAndListen(
-            'I did not hear a question. Say play to keep learning.'));
+        if (longestPartial.isNotEmpty) {
+          handleQuestion(longestPartial);
+        } else {
+          handled = true;
+          unawaited(_announceAndListen(
+              'I did not hear a question. Say play to keep learning.'));
+        }
       },
     );
   }
@@ -2820,34 +2846,45 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
     if (!mounted || session != _session) return;
 
     var handled = false;
-    var lastPartial = '';
+    var longestPartial = '';
     setState(() => _statusText = 'Listening… speak now.');
 
-    stt.startListening(
+    final started = stt.startListening(
+      listenFor: const Duration(seconds: 30),
+      pauseFor: const Duration(seconds: 10),
       // Many Android recognizers end a session WITHOUT a final result and
       // send only partials. Without this fallback, every capture attempt on
       // such devices ended in "I didn't catch that" forever — field test:
       // a student could never join a class by voice.
       onPartial: (words) {
-        if (words.trim().isNotEmpty) lastPartial = words.trim();
+        final partial = words.trim();
+        if (partial.length > longestPartial.length) {
+          longestPartial = partial;
+        }
       },
       onResult: (words) {
         if (handled || session != _session) return;
         final trimmed = words.trim();
         if (trimmed.isEmpty) return;
+        final recognized =
+            trimmed.length >= longestPartial.length ? trimmed : longestPartial;
         handled = true;
-        unawaited(onHeard(trimmed));
+        unawaited(onHeard(recognized));
       },
       onDone: () {
         if (handled || session != _session) return;
         handled = true;
-        if (lastPartial.isNotEmpty) {
-          unawaited(onHeard(lastPartial));
+        if (longestPartial.isNotEmpty) {
+          unawaited(onHeard(longestPartial));
         } else {
           unawaited(onUnclear());
         }
       },
     );
+    if (!started && !handled && session == _session) {
+      handled = true;
+      unawaited(onUnclear());
+    }
   }
 
   // ── Step 1: name ──────────────────────────────────────────────────────────
@@ -2888,9 +2925,10 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
 
   Future<void> _beginCodeCapture() async {
     await _captureSpeech(
-      prompt: 'Now ask your teacher for your class code, and say it now, '
-          'one character at a time: S, C, dash, then the four letters or '
-          'numbers. A helper can also type it in the box on the screen.',
+      prompt: 'Now ask your teacher for the four letters or numbers after '
+          'S C dash in the class code. Say only those four characters, one '
+          'at a time. Do not say S C or dash. A helper can also type the four '
+          'characters in the box on the screen.',
       listeningStage: _JoinStage.askCode,
       onHeard: (heard) async {
         await ref.read(sttServiceProvider).stopListening();
@@ -2901,7 +2939,7 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
           _stage = _JoinStage.confirmCode;
         });
         await _say(
-          'I heard the code ${_spellOut(code)}. Tap once if that is right. '
+          'I heard S C dash ${_spellOut(code)}. Tap once if that is right. '
           'Tap twice to say it again.',
         );
       },
@@ -2923,8 +2961,8 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
 
   /// Typed-code fallback for when voice capture keeps failing (noisy room,
   /// no offline recognizer, unusual accent for letter names). A sighted
-  /// helper or the teacher types the code exactly; no spoken confirm loop is
-  /// needed because typing is already deliberate.
+  /// helper or the teacher types only the four-character suffix; the app
+  /// supplies `SC-`.
   Future<void> _useTypedCode() async {
     final typed = _codeController.text.trim();
     if (typed.isEmpty) return;
@@ -2937,12 +2975,12 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
 
   // ── Step 3: link the account (silent network step) ───────────────────────
 
-  /// A class code is `SC-` or `TC-` plus exactly four letters/digits. Checked
+  /// A student class code is `SC-` plus exactly four letters/digits. Checked
   /// BEFORE any network call: a mis-heard code used to travel all the way to
   /// the server (possibly through a 40-second cold start) only to bounce with
   /// a validation error — the student waited in silence for a rejection we
   /// could have spoken immediately.
-  static final RegExp _codeShape = RegExp(r'^(SC|TC)-[A-Z0-9]{4}$');
+  static final RegExp _codeShape = RegExp(r'^SC-[A-Z0-9]{4}$');
 
   Future<void> _finishLinking() async {
     if (!mounted) return;
@@ -2950,9 +2988,8 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
     if (!_codeShape.hasMatch(_spokenCode)) {
       setState(() => _stage = _JoinStage.confirmCode);
       await _say(
-        'That code doesn\'t sound complete. A class code is S C or T C, '
-        'dash, then exactly four letters or numbers — like S C dash 9 F X 2. '
-        'Let\'s try the code again.',
+        'Those four characters don\'t sound complete. Say exactly four '
+        'letters or numbers after S C dash, like 9 F X 2. Let\'s try again.',
       );
       if (!mounted) return;
       await _beginCodeCapture();
@@ -3070,12 +3107,10 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
         .join(' ');
   }
 
-  /// Turns whatever the speech engine heard into a best-guess class code.
-  /// Codes follow the shape `SC-XXXX`; this converts spoken digit words
-  /// ("four" -> "4") and spoken letter names ("ess"/"see" -> "S"/"C"),
-  /// strips remaining punctuation, uppercases, and re-inserts the dash so
-  /// common spoken variants ("S C 4 2 7 1", "es see four two seven one",
-  /// "S C dash 4 2 7 1", "sc4271") all converge.
+  /// Turns the spoken four-character suffix into the full class code.
+  /// This converts spoken digit words and letter names, strips punctuation,
+  /// and supplies the fixed `SC-` prefix. If speech includes the prefix
+  /// anyway, it is removed so common variants still converge.
   static String _normalizeCode(String raw) {
     final tokens = raw
         .toLowerCase()
@@ -3104,15 +3139,11 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
       buffer.write(cleaned.toUpperCase());
     }
 
-    final cleaned = buffer.toString();
-    if (cleaned.length > 2) {
-      final prefix = cleaned.substring(0, 2);
-      final rest = cleaned.substring(2);
-      if (prefix == 'SC' || prefix == 'TC') {
-        return '$prefix-$rest';
-      }
+    var suffix = buffer.toString();
+    if (suffix.startsWith('SC')) {
+      suffix = suffix.substring(2);
     }
-    return cleaned.isEmpty ? raw.trim().toUpperCase() : cleaned;
+    return suffix.isEmpty ? 'SC-' : 'SC-$suffix';
   }
 
   /// Maps a spoken digit word (or numeral) to its single-character digit.
@@ -3124,9 +3155,6 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
 
     switch (token) {
       case 'zero':
-      case 'oh':
-      case 'o':
-        return '0';
       case 'one':
       case 'won':
         return '1';
@@ -3156,11 +3184,10 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
   }
 
   /// Maps a spoken letter name to the letter it represents. Class codes are
-  /// `SC-`/`TC-` plus FOUR RANDOM CHARACTERS from the full A–Z, 0–9 alphabet
-  /// (the backend's `generate_student_code`), so every letter name must be
-  /// recognisable — a code like SC-MFQ8 was impossible to say before this
-  /// covered more than S, C and T. Digit homophones ("oh"→0, "for"→4) are
-  /// resolved first by [_digitFromWord], so they never reach this table.
+  /// `SC-` plus FOUR RANDOM CHARACTERS from the full A–Z, 0–9 alphabet (the
+  /// backend's `generate_student_code`), so every letter name must be
+  /// recognisable. Digit words are resolved first by [_digitFromWord];
+  /// "zero" and "four" should be used when the character is a number.
   static String? _letterFromWord(String token) {
     switch (token) {
       case 'a':
@@ -3218,6 +3245,9 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
       case 'n':
       case 'en':
         return 'N';
+      case 'o':
+      case 'oh':
+        return 'O';
       case 'p':
       case 'pee':
       case 'pea':
@@ -3266,10 +3296,10 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
     return null;
   }
 
-  /// Spells a code out character by character for an unambiguous read-back,
-  /// e.g. "SC-4271" -> "S, C, dash, 4, 2, 7, 1".
+  /// Spells the four-character suffix out for an unambiguous read-back.
   static String _spellOut(String code) {
-    return code.split('').map((c) => c == '-' ? 'dash' : c).join(', ');
+    final suffix = code.startsWith('SC-') ? code.substring(3) : code;
+    return suffix.split('').join(', ');
   }
 
   // ── UI ────────────────────────────────────────────────────────────────────
@@ -3311,9 +3341,8 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
                           TextStyle(fontSize: 13, color: Colors.grey.shade600),
                     ),
                   ],
-                  // Typed fallback: voice capture of a spelled code can fail in a
-                  // noisy room or without a recognizer. A sighted helper types the
-                  // code exactly as the teacher shared it (e.g. SC-MFQ8).
+                  // Typed fallback: voice capture of a spelled suffix can fail
+                  // in a noisy room or without a recognizer.
                   if (_stage == _JoinStage.askCode ||
                       _stage == _JoinStage.confirmCode ||
                       _stage == _JoinStage.error) ...[
@@ -3321,9 +3350,15 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
                     TextField(
                       controller: _codeController,
                       textCapitalization: TextCapitalization.characters,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                            RegExp(r'[a-zA-Z0-9]')),
+                        LengthLimitingTextInputFormatter(4),
+                      ],
                       decoration: const InputDecoration(
-                        labelText: 'Or type the class code',
-                        hintText: 'e.g. SC-4B7K',
+                        labelText: 'Or type the four characters',
+                        hintText: 'e.g. 4B7K',
+                        prefixText: 'SC-',
                         border: OutlineInputBorder(),
                         isDense: true,
                       ),

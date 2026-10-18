@@ -36,29 +36,17 @@ A question is **valid** when all of these hold:
 
 **2. Fill in the blank. In the number 4,567,890, the digit 5 is in the blank place, so its total value is 500,000.**
 
-- A. Ten Thousands
-- B. divide
-- C. Hundred Thousands ←
-- D. Primary Six
+- A. Primary Six
+- B. Ten Thousands
+- C. billions
+- D. Hundred Thousands ←
 
 - Auto: PASS
 - Concepts hit: none
 - Explanation: From your lesson: In the number 4,567,890, the digit 5 is in the Hundred Thousands place, so its total value is 500,000.
 - **Verdict (`01_number_operations_p6_math,2`): ______**
 
-**3. Fill in the blank. In the number 3,486,789, if the digit 8 is underlined, its place value is blank and its total value is 80,000.**
-
-- A. Primary Six
-- B. Hundreds
-- C. Ten Thousands ←
-- D. Hundred Thousands
-
-- Auto: PASS
-- Concepts hit: place_value
-- Explanation: From your lesson: In the number 3,486,789, if the digit 8 is underlined, its place value is Ten Thousands and its total value is 80,000.
-- **Verdict (`01_number_operations_p6_math,3`): ______**
-
-**4. What are addends?**
+**3. What are addends?**
 
 - A. the sum
 - B. the numbers being added ←
@@ -68,61 +56,25 @@ A question is **valid** when all of these hold:
 - Auto: PASS
 - Concepts hit: addends
 - Explanation: From your lesson: Addends are the numbers being added.
-- **Verdict (`01_number_operations_p6_math,4`): ______**
+- **Verdict (`01_number_operations_p6_math,3`): ______**
 
-**5. What is the answer?**
+**4. When is a number divisible by 2?**
 
-- A. done from left to right
-- B. the sum ←
-- C. the minuend
-- D. the numbers being added
-
-- Auto: PASS
-- Concepts hit: none
-- Explanation: From your lesson: The answer is the sum.
-- **Verdict (`01_number_operations_p6_math,5`): ______**
-
-**6. Fill in the blank. In blank, the number being subtracted from is the minuend, the number subtracted is the subtrahend, and the answer is the difference.**
-
-- A. adding
-- B. Millions
-- C. Bring
-- D. subtraction ←
-
-- Auto: PASS
-- Concepts hit: none
-- Explanation: From your lesson: In subtraction, the number being subtracted from is the minuend, the number subtracted is the subtrahend, and the answer is the difference.
-- **Verdict (`01_number_operations_p6_math,6`): ______**
-
-**7. Fill in the blank. When a number sentence has more than one operation, you must follow the order of blank: BODMAS.**
-
-- A. minuend
-- B. Bring
-- C. divisible
-- D. operations ←
-
-- Auto: FAIL (A4_well_formed)
-- Concepts hit: bodmas_order
-- Explanation: From your lesson: When a number sentence has more than one operation, you must follow the order of operations: BODMAS.
-- **Verdict (`01_number_operations_p6_math,7`): ______**
-
-**8. When is A number divisible by 2?**
-
-- A. its last digit is 0 or 5
+- A. it is divisible by both 2 and 3
 - B. its last digit is even ←
 - C. its last digit is 0
-- D. it is divisible by both 2 and 3
+- D. its last digit is 0 or 5
 
 - Auto: PASS
 - Concepts hit: divisibility_two
 - Explanation: From your lesson: A number is divisible by 2 if its last digit is even (0, 2, 4, 6, 8).
-- **Verdict (`01_number_operations_p6_math,8`): ______**
+- **Verdict (`01_number_operations_p6_math,4`): ______**
 
 ---
 
 ## Living and Non-Living Things (Science, P.3)
 
-**1. Fill in the blank. blank things are things that are ALIVE.**
+**1. Fill in the blank. Even a seed (like a bean seed) is a blank thing.**
 
 - A. chalkboard
 - B. matoke
@@ -130,75 +82,15 @@ A question is **valid** when all of these hold:
 - D. Living ←
 
 - Auto: PASS
-- Concepts hit: living_definition
-- Explanation: From your lesson: Living things are things that are ALIVE.
-- **Verdict (`02_living_things_p3_science,1`): ______**
-
-**2. Fill in the blank. Non-living things are things that are blank.**
-
-- A. NOT ALIVE ←
-- B. ACTIVITY FOR
-- C. QUICK QUESTIONS
-- D. jerrycan
-
-- Auto: PASS
-- Concepts hit: living_definition, nonliving_definition
-- Explanation: From your lesson: Non-living things are things that are NOT ALIVE.
-- **Verdict (`02_living_things_p3_science,2`): ______**
-
-**3. Fill in the blank. Bricks used for blank houses**
-
-- A. Grow
-- B. building ←
-- C. Pencil
-- D. respect
-
-- Auto: PASS
-- Concepts hit: none
-- Explanation: From your lesson: Bricks used for building houses
-- **Verdict (`02_living_things_p3_science,3`): ______**
-
-**4. Fill in the blank. Even a seed (like a bean seed) is a blank thing.**
-
-- A. bicycle
-- B. notebook
-- C. Living ←
-- D. Movement
-
-- Auto: PASS
 - Concepts hit: none
 - Explanation: From your lesson: Even a seed (like a bean seed) is a living thing.
-- **Verdict (`02_living_things_p3_science,4`): ______**
+- **Verdict (`02_living_things_p3_science,1`): ______**
 
 ---
 
 ## Food and Nutrition (Science, P.4)
 
-**1. Fill in the blank. Food is blank we eat or drink that gives us energy, helps us grow,**
-
-- A. Sewerage
-- B. anything ←
-- C. oxygen
-- D. Boiling
-
-- Auto: PASS
-- Concepts hit: food_definition
-- Explanation: From your lesson: Food is anything we eat or drink that gives us energy, helps us grow,
-- **Verdict (`03_food_nutrition_p4_science,1`): ______**
-
-**2. Fill in the blank. You feel cold blank and have dry skin.**
-
-- A. ovacado
-- B. cassava
-- C. wounds
-- D. easily ←
-
-- Auto: PASS
-- Concepts hit: none
-- Explanation: From your lesson: You feel cold easily and have dry skin.
-- **Verdict (`03_food_nutrition_p4_science,2`): ______**
-
-**3. What is water?**
+**1. What is water?**
 
 - A. so important that we learn more
 - B. not just tasty – they have three times more protein than beef!
@@ -208,9 +100,9 @@ A question is **valid** when all of these hold:
 - Auto: PASS
 - Concepts hit: none
 - Explanation: From your lesson: Water is the only nutrient you cannot live without for more than a few days.
-- **Verdict (`03_food_nutrition_p4_science,3`): ______**
+- **Verdict (`03_food_nutrition_p4_science,1`): ______**
 
-**4. What is a balanced diet?**
+**2. What is a balanced diet?**
 
 - A. the only nutrient you cannot live without for more than a few
 - B. so important that we learn more
@@ -220,33 +112,9 @@ A question is **valid** when all of these hold:
 - Auto: PASS
 - Concepts hit: balanced_diet
 - Explanation: From your lesson: A balanced diet is a meal that contains all six classes of food in the right amounts.
-- **Verdict (`03_food_nutrition_p4_science,4`): ______**
+- **Verdict (`03_food_nutrition_p4_science,2`): ______**
 
-**5. Fill in the blank. We already listed water as Class 6, but it is so blank that we learn more.**
-
-- A. grasshoppers
-- B. Vegetables
-- C. important ←
-- D. HABITS
-
-- Auto: PASS
-- Concepts hit: none
-- Explanation: From your lesson: We already listed water as Class 6, but it is so important that we learn more.
-- **Verdict (`03_food_nutrition_p4_science,5`): ______**
-
-**6. Fill in the blank. If you are a school-going child, carry a healthy lunchbox: e.g., boiled egg, chapati with blank, a piece of fruit.**
-
-- A. Removes
-- B. people
-- C. diarrhoea
-- D. groundnut ←
-
-- Auto: FAIL (A4_well_formed)
-- Concepts hit: none
-- Explanation: From your lesson: If you are a school-going child, carry a healthy lunchbox: e.g., boiled egg, chapati with groundnut, a piece of fruit.
-- **Verdict (`03_food_nutrition_p4_science,6`): ______**
-
-**7. What is mukene (silver fish)?**
+**3. What is mukene (silver fish)?**
 
 - A. a school-going child
 - B. very good for children ←
@@ -256,9 +124,9 @@ A question is **valid** when all of these hold:
 - Auto: PASS
 - Concepts hit: none
 - Explanation: From your lesson: Mukene (silver fish) is very good for children because you eat the whole fish – bones and all – which gives calcium for strong teeth and bones!
-- **Verdict (`03_food_nutrition_p4_science,7`): ______**
+- **Verdict (`03_food_nutrition_p4_science,3`): ______**
 
-**8. What are nsenene (grasshoppers)?**
+**4. What are nsenene (grasshoppers)?**
 
 - A. the only nutrient you cannot live without for more than a few
 - B. a meal that contains all six classes of food in the right
@@ -268,7 +136,19 @@ A question is **valid** when all of these hold:
 - Auto: PASS
 - Concepts hit: proteins
 - Explanation: From your lesson: Nsenene (grasshoppers) are not just tasty – they have three times more protein than beef!
-- **Verdict (`03_food_nutrition_p4_science,8`): ______**
+- **Verdict (`03_food_nutrition_p4_science,4`): ______**
+
+**5. Fill in the blank. A ripe mango has more blank C than an orange.**
+
+- A. Sewerage
+- B. Vitamin ←
+- C. oxygen
+- D. Carbohydrates
+
+- Auto: PASS
+- Concepts hit: none
+- Explanation: From your lesson: A ripe mango has more Vitamin C than an orange.
+- **Verdict (`03_food_nutrition_p4_science,5`): ______**
 
 ---
 
@@ -702,19 +582,7 @@ A question is **valid** when all of these hold:
 
 ## Parts of Speech (English, P.6)
 
-**1. Fill in the blank. A part of blank is the name given to a word according to the work it does**
-
-- A. speech ←
-- B. pronoun
-- C. relationship
-- D. pronouns
-
-- Auto: PASS
-- Concepts hit: none
-- Explanation: From your lesson: A part of speech is the name given to a word according to the work it does
-- **Verdict (`09_parts_of_speech_p6_english,1`): ______**
-
-**2. What is a noun?**
+**1. What is a noun?**
 
 - A. a word that describes a verb
 - B. a word that names a person ←
@@ -724,9 +592,9 @@ A question is **valid** when all of these hold:
 - Auto: PASS
 - Concepts hit: noun
 - Explanation: From your lesson: A noun is a word that names a person, a place, an animal or a thing.
-- **Verdict (`09_parts_of_speech_p6_english,2`): ______**
+- **Verdict (`09_parts_of_speech_p6_english,1`): ______**
 
-**3. What is a pronoun?**
+**2. What is a pronoun?**
 
 - A. a noun that names a particular person or place and begins
 - B. a word that is used in place of a noun ←
@@ -736,9 +604,9 @@ A question is **valid** when all of these hold:
 - Auto: PASS
 - Concepts hit: pronoun
 - Explanation: From your lesson: A pronoun is a word that is used in place of a noun.
-- **Verdict (`09_parts_of_speech_p6_english,3`): ______**
+- **Verdict (`09_parts_of_speech_p6_english,2`): ______**
 
-**4. What is a helping verb?**
+**3. What is a helping verb?**
 
 - A. a verb that is used together with a main verb ←
 - B. a noun that names a group of things taken together
@@ -748,9 +616,9 @@ A question is **valid** when all of these hold:
 - Auto: PASS
 - Concepts hit: none
 - Explanation: From your lesson: A helping verb is a verb that is used together with a main verb, such as is or have.
-- **Verdict (`09_parts_of_speech_p6_english,4`): ______**
+- **Verdict (`09_parts_of_speech_p6_english,3`): ______**
 
-**5. What is an adjective?**
+**4. What is an adjective?**
 
 - A. a noun that names a group of things taken together
 - B. a word that expresses a sudden strong feeling
@@ -760,9 +628,9 @@ A question is **valid** when all of these hold:
 - Auto: PASS
 - Concepts hit: pronoun, adjective
 - Explanation: From your lesson: An adjective is a word that describes a noun or a pronoun.
-- **Verdict (`09_parts_of_speech_p6_english,5`): ______**
+- **Verdict (`09_parts_of_speech_p6_english,4`): ______**
 
-**6. What is a preposition?**
+**5. What is a preposition?**
 
 - A. a noun that names any one of a group of things
 - B. a word that shows the position or relationship of a noun ←
@@ -772,9 +640,9 @@ A question is **valid** when all of these hold:
 - Auto: PASS
 - Concepts hit: none
 - Explanation: From your lesson: A preposition is a word that shows the position or relationship of a noun
-- **Verdict (`09_parts_of_speech_p6_english,6`): ______**
+- **Verdict (`09_parts_of_speech_p6_english,5`): ______**
 
-**7. What is an interjection?**
+**6. What is an interjection?**
 
 - A. a word that describes a noun or a pronoun
 - B. a word that expresses a sudden strong feeling ←
@@ -784,7 +652,7 @@ A question is **valid** when all of these hold:
 - Auto: PASS
 - Concepts hit: none
 - Explanation: From your lesson: An interjection is a word that expresses a sudden strong feeling.
-- **Verdict (`09_parts_of_speech_p6_english,7`): ______**
+- **Verdict (`09_parts_of_speech_p6_english,6`): ______**
 
 ---
 

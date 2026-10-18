@@ -24,12 +24,12 @@
         "index": 2,
         "questionText": "Fill in the blank. In the number 4,567,890, the digit 5 is in the blank place, so its total value is 500,000.",
         "options": [
+          "Primary Six",
           "Ten Thousands",
-          "divide",
-          "Hundred Thousands",
-          "Primary Six"
+          "billions",
+          "Hundred Thousands"
         ],
-        "correctOption": "C",
+        "correctOption": "D",
         "explanation": "From your lesson: In the number 4,567,890, the digit 5 is in the Hundred Thousands place, so its total value is 500,000.",
         "autoValid": true,
         "failedChecks": [],
@@ -37,23 +37,6 @@
       },
       {
         "index": 3,
-        "questionText": "Fill in the blank. In the number 3,486,789, if the digit 8 is underlined, its place value is blank and its total value is 80,000.",
-        "options": [
-          "Primary Six",
-          "Hundreds",
-          "Ten Thousands",
-          "Hundred Thousands"
-        ],
-        "correctOption": "C",
-        "explanation": "From your lesson: In the number 3,486,789, if the digit 8 is underlined, its place value is Ten Thousands and its total value is 80,000.",
-        "autoValid": true,
-        "failedChecks": [],
-        "conceptsHit": [
-          "place_value"
-        ]
-      },
-      {
-        "index": 4,
         "questionText": "What are addends?",
         "options": [
           "the sum",
@@ -70,62 +53,13 @@
         ]
       },
       {
-        "index": 5,
-        "questionText": "What is the answer?",
+        "index": 4,
+        "questionText": "When is a number divisible by 2?",
         "options": [
-          "done from left to right",
-          "the sum",
-          "the minuend",
-          "the numbers being added"
-        ],
-        "correctOption": "B",
-        "explanation": "From your lesson: The answer is the sum.",
-        "autoValid": true,
-        "failedChecks": [],
-        "conceptsHit": []
-      },
-      {
-        "index": 6,
-        "questionText": "Fill in the blank. In blank, the number being subtracted from is the minuend, the number subtracted is the subtrahend, and the answer is the difference.",
-        "options": [
-          "adding",
-          "Millions",
-          "Bring",
-          "subtraction"
-        ],
-        "correctOption": "D",
-        "explanation": "From your lesson: In subtraction, the number being subtracted from is the minuend, the number subtracted is the subtrahend, and the answer is the difference.",
-        "autoValid": true,
-        "failedChecks": [],
-        "conceptsHit": []
-      },
-      {
-        "index": 7,
-        "questionText": "Fill in the blank. When a number sentence has more than one operation, you must follow the order of blank: BODMAS.",
-        "options": [
-          "minuend",
-          "Bring",
-          "divisible",
-          "operations"
-        ],
-        "correctOption": "D",
-        "explanation": "From your lesson: When a number sentence has more than one operation, you must follow the order of operations: BODMAS.",
-        "autoValid": false,
-        "failedChecks": [
-          "A4_well_formed"
-        ],
-        "conceptsHit": [
-          "bodmas_order"
-        ]
-      },
-      {
-        "index": 8,
-        "questionText": "When is A number divisible by 2?",
-        "options": [
-          "its last digit is 0 or 5",
+          "it is divisible by both 2 and 3",
           "its last digit is even",
           "its last digit is 0",
-          "it is divisible by both 2 and 3"
+          "its last digit is 0 or 5"
         ],
         "correctOption": "B",
         "explanation": "From your lesson: A number is divisible by 2 if its last digit is even (0, 2, 4, 6, 8).",
@@ -143,7 +77,7 @@
     "questions": [
       {
         "index": 1,
-        "questionText": "Fill in the blank. blank things are things that are ALIVE.",
+        "questionText": "Fill in the blank. Even a seed (like a bean seed) is a blank thing.",
         "options": [
           "chalkboard",
           "matoke",
@@ -151,56 +85,6 @@
           "Living"
         ],
         "correctOption": "D",
-        "explanation": "From your lesson: Living things are things that are ALIVE.",
-        "autoValid": true,
-        "failedChecks": [],
-        "conceptsHit": [
-          "living_definition"
-        ]
-      },
-      {
-        "index": 2,
-        "questionText": "Fill in the blank. Non-living things are things that are blank.",
-        "options": [
-          "NOT ALIVE",
-          "ACTIVITY FOR",
-          "QUICK QUESTIONS",
-          "jerrycan"
-        ],
-        "correctOption": "A",
-        "explanation": "From your lesson: Non-living things are things that are NOT ALIVE.",
-        "autoValid": true,
-        "failedChecks": [],
-        "conceptsHit": [
-          "living_definition",
-          "nonliving_definition"
-        ]
-      },
-      {
-        "index": 3,
-        "questionText": "Fill in the blank. Bricks used for blank houses",
-        "options": [
-          "Grow",
-          "building",
-          "Pencil",
-          "respect"
-        ],
-        "correctOption": "B",
-        "explanation": "From your lesson: Bricks used for building houses",
-        "autoValid": true,
-        "failedChecks": [],
-        "conceptsHit": []
-      },
-      {
-        "index": 4,
-        "questionText": "Fill in the blank. Even a seed (like a bean seed) is a blank thing.",
-        "options": [
-          "bicycle",
-          "notebook",
-          "Living",
-          "Movement"
-        ],
-        "correctOption": "C",
         "explanation": "From your lesson: Even a seed (like a bean seed) is a living thing.",
         "autoValid": true,
         "failedChecks": [],
@@ -214,38 +98,6 @@
     "questions": [
       {
         "index": 1,
-        "questionText": "Fill in the blank. Food is blank we eat or drink that gives us energy, helps us grow,",
-        "options": [
-          "Sewerage",
-          "anything",
-          "oxygen",
-          "Boiling"
-        ],
-        "correctOption": "B",
-        "explanation": "From your lesson: Food is anything we eat or drink that gives us energy, helps us grow,",
-        "autoValid": true,
-        "failedChecks": [],
-        "conceptsHit": [
-          "food_definition"
-        ]
-      },
-      {
-        "index": 2,
-        "questionText": "Fill in the blank. You feel cold blank and have dry skin.",
-        "options": [
-          "ovacado",
-          "cassava",
-          "wounds",
-          "easily"
-        ],
-        "correctOption": "D",
-        "explanation": "From your lesson: You feel cold easily and have dry skin.",
-        "autoValid": true,
-        "failedChecks": [],
-        "conceptsHit": []
-      },
-      {
-        "index": 3,
         "questionText": "What is water?",
         "options": [
           "so important that we learn more",
@@ -260,7 +112,7 @@
         "conceptsHit": []
       },
       {
-        "index": 4,
+        "index": 2,
         "questionText": "What is a balanced diet?",
         "options": [
           "the only nutrient you cannot live without for more than a few",
@@ -277,39 +129,7 @@
         ]
       },
       {
-        "index": 5,
-        "questionText": "Fill in the blank. We already listed water as Class 6, but it is so blank that we learn more.",
-        "options": [
-          "grasshoppers",
-          "Vegetables",
-          "important",
-          "HABITS"
-        ],
-        "correctOption": "C",
-        "explanation": "From your lesson: We already listed water as Class 6, but it is so important that we learn more.",
-        "autoValid": true,
-        "failedChecks": [],
-        "conceptsHit": []
-      },
-      {
-        "index": 6,
-        "questionText": "Fill in the blank. If you are a school-going child, carry a healthy lunchbox: e.g., boiled egg, chapati with blank, a piece of fruit.",
-        "options": [
-          "Removes",
-          "people",
-          "diarrhoea",
-          "groundnut"
-        ],
-        "correctOption": "D",
-        "explanation": "From your lesson: If you are a school-going child, carry a healthy lunchbox: e.g., boiled egg, chapati with groundnut, a piece of fruit.",
-        "autoValid": false,
-        "failedChecks": [
-          "A4_well_formed"
-        ],
-        "conceptsHit": []
-      },
-      {
-        "index": 7,
+        "index": 3,
         "questionText": "What is mukene (silver fish)?",
         "options": [
           "a school-going child",
@@ -324,7 +144,7 @@
         "conceptsHit": []
       },
       {
-        "index": 8,
+        "index": 4,
         "questionText": "What are nsenene (grasshoppers)?",
         "options": [
           "the only nutrient you cannot live without for more than a few",
@@ -339,6 +159,21 @@
         "conceptsHit": [
           "proteins"
         ]
+      },
+      {
+        "index": 5,
+        "questionText": "Fill in the blank. A ripe mango has more blank C than an orange.",
+        "options": [
+          "Sewerage",
+          "Vitamin",
+          "oxygen",
+          "Carbohydrates"
+        ],
+        "correctOption": "B",
+        "explanation": "From your lesson: A ripe mango has more Vitamin C than an orange.",
+        "autoValid": true,
+        "failedChecks": [],
+        "conceptsHit": []
       }
     ]
   },
@@ -920,21 +755,6 @@
     "questions": [
       {
         "index": 1,
-        "questionText": "Fill in the blank. A part of blank is the name given to a word according to the work it does",
-        "options": [
-          "speech",
-          "pronoun",
-          "relationship",
-          "pronouns"
-        ],
-        "correctOption": "A",
-        "explanation": "From your lesson: A part of speech is the name given to a word according to the work it does",
-        "autoValid": true,
-        "failedChecks": [],
-        "conceptsHit": []
-      },
-      {
-        "index": 2,
         "questionText": "What is a noun?",
         "options": [
           "a word that describes a verb",
@@ -951,7 +771,7 @@
         ]
       },
       {
-        "index": 3,
+        "index": 2,
         "questionText": "What is a pronoun?",
         "options": [
           "a noun that names a particular person or place and begins",
@@ -968,7 +788,7 @@
         ]
       },
       {
-        "index": 4,
+        "index": 3,
         "questionText": "What is a helping verb?",
         "options": [
           "a verb that is used together with a main verb",
@@ -983,7 +803,7 @@
         "conceptsHit": []
       },
       {
-        "index": 5,
+        "index": 4,
         "questionText": "What is an adjective?",
         "options": [
           "a noun that names a group of things taken together",
@@ -1001,7 +821,7 @@
         ]
       },
       {
-        "index": 6,
+        "index": 5,
         "questionText": "What is a preposition?",
         "options": [
           "a noun that names any one of a group of things",
@@ -1016,7 +836,7 @@
         "conceptsHit": []
       },
       {
-        "index": 7,
+        "index": 6,
         "questionText": "What is an interjection?",
         "options": [
           "a word that describes a noun or a pronoun",
