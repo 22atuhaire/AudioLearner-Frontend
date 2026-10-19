@@ -44,10 +44,10 @@ class AccessibilityMode {
 
   /// The app should keep the microphone open listening for commands.
   ///
-  /// Disabled under a screen reader: TalkBack speaks constantly as the student
-  /// explores by touch, the microphone hears it, and the recogniser feeds the
-  /// app its own interface as commands. The explicit "Ask a question" control
-  /// still opens the microphone on demand.
+  /// By default under a screen reader, continuous unprompted background listening
+  /// is suspended to prevent TalkBack exploration chatter from triggering
+  /// unintended navigation commands. Students can use the explicit Voice Command
+  /// button or enable Voice Auto-Listen.
   bool get shouldAutoListen => !screenReaderEnabled;
 
   /// Show the on-screen control panel of real, labelled buttons.

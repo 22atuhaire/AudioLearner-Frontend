@@ -183,6 +183,16 @@ class _StudentProgressScreenState extends ConsumerState<StudentProgressScreen> {
             tooltip: 'Back to learning',
             onPressed: _goBack,
           ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.mic_rounded),
+              tooltip: 'Voice command. Double tap to speak.',
+              onPressed: () {
+                _silentWindows = 0;
+                _listenForCommand(++_listenSession);
+              },
+            ),
+          ],
         ),
         // Single tap replays the summary; double tap leaves — both work without
         // sight, alongside the spoken "back" command.

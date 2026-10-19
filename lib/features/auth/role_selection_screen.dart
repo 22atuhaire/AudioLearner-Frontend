@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -62,6 +63,11 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
       // Let TalkBack speak this if it is running, rather than talking over it.
       if (AccessibilityMode.isScreenReaderActive) {
         AccessibilityMode.announce(welcome);
+        // Wait for the welcome announcement to complete, then listen for role
+        await Future<void>.delayed(const Duration(milliseconds: 4500));
+        if (mounted && !_navigated) {
+          unawaited(_listenForRole());
+        }
         return;
       }
 
@@ -157,6 +163,11 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
     final ready = await stt.initialize();
     if (!ready || !mounted || _navigated) return;
 
+    try {
+      await HapticFeedback.mediumImpact();
+      await SystemSound.play(SystemSoundType.click);
+    } catch (_) {}
+
     var handled = false;
     void match(String words) {
       if (handled || _navigated) return;
@@ -165,13 +176,21 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
         handled = true;
         _navigated = true;
         unawaited(stt.stopListening());
-        _speak('Student selected. Opening the learner screen.');
+        if (AccessibilityMode.isScreenReaderActive) {
+          AccessibilityMode.announce('Student selected. Opening student login.');
+        } else {
+          _speak('Student selected. Opening the learner screen.');
+        }
         context.go('/student/pin');
       } else if (command.contains('teacher')) {
         handled = true;
         _navigated = true;
         unawaited(stt.stopListening());
-        _speak('Teacher selected. Opening teacher sign in.');
+        if (AccessibilityMode.isScreenReaderActive) {
+          AccessibilityMode.announce('Teacher selected. Opening teacher sign in.');
+        } else {
+          _speak('Teacher selected. Opening teacher sign in.');
+        }
         context.push('/teacher/pin');
       }
     }
@@ -240,13 +259,52 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
               ),
             ),
 
+            // ── Top-left Voice Button (accessible for TalkBack & voice) ───
+            Positioned(
+              top: 16,
+              left: 16,
+              child: SafeArea(
+                child: Semantics(
+                  label: 'Voice command. Double-tap to say student or teacher.',
+                  button: true,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF1A56DB),
+                      side: const BorderSide(
+                        color: Color(0xFF1A56DB),
+                        width: 2,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                    ),
+                    icon: const Icon(Icons.mic_rounded, size: 20),
+                    label: const Text(
+                      'Say Role',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    onPressed: () {
+                      unawaited(_listenForRole());
+                    },
+                  ),
+                ),
+              ),
+            ),
+
             // ── Top-right Teacher Button ──────────────────────────────────
             Positioned(
               top: 16,
               right: 16,
               child: SafeArea(
                 child: Semantics(
-                  label: 'Teacher mode. Tap to continue as a teacher.',
+                  label: 'Teacher mode. Double-tap to continue as a teacher.',
                   button: true,
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
@@ -272,11 +330,7 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
                       ),
                     ),
                     onPressed: () {
-                      // Stop the background voice-command loop — otherwise it
-                      // keeps restarting every few seconds on the screen
-                      // underneath, each restart triggering the speech
-                      // recognizer's start/stop chime and a platform-channel
-                      // hiccup that freezes typing on the next screen.
+                      // Stop the background voice-command loop
                       _navigated = true;
                       unawaited(ref.read(sttServiceProvider).stopListening());
                       context.push('/teacher/pin');
@@ -286,19 +340,29 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
               ),
             ),
 
-            // ── Clickable bottom zone for students ─────────────────────────
+            // ── Accessible bottom zone for students ─────────────────────────
             Positioned(
               bottom: 0,
               left: 0,
               right: 0,
               height: 200,
-              child: GestureDetector(
-                onTap: () {
-                  _navigated = true;
-                  unawaited(ref.read(sttServiceProvider).stopListening());
-                  _speak('Student selected. Opening the learner screen.');
-                  context.go('/student/pin');
-                },
+              child: Semantics(
+                button: true,
+                label: 'Student mode. Double-tap to enter as student.',
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () {
+                      _navigated = true;
+                      unawaited(ref.read(sttServiceProvider).stopListening());
+                      if (AccessibilityMode.isScreenReaderActive) {
+                        AccessibilityMode.announce(
+                            'Student selected. Opening the learner screen.');
+                      } else {
+                        _speak('Student selected. Opening the learner screen.');
+                      }
+                      context.go('/student/pin');
+                    },
                 child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -340,6 +404,8 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
                 ),
               ),
             ),
+          ),
+        ),
           ],
         ),
       ),

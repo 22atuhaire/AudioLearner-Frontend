@@ -67,6 +67,12 @@ class _StudentLearningHubScreenState
   int _silentWindows = 0;
   static const int _maxSilentWindows = 3;
 
+  // ── Screen-reader voice interaction ─────────────────────────────────────
+  // Allows TalkBack users to either auto-listen for commands after announcements
+  // or use the explicit "Voice command" push-to-talk button.
+  bool _voiceAutoListen = true;
+  static const String _kVoiceAutoListenKey = 'voice_auto_listen_screen_reader';
+
   // ── Echo guard ──────────────────────────────────────────────────────────
   // On a hands-free phone the microphone hears the app's own spoken prompt
   // through the speaker. Because prompts contain command words ("...say next
@@ -202,6 +208,7 @@ class _StudentLearningHubScreenState
     _stt = ref.read(sttServiceProvider);
     _tts = ref.read(ttsServiceProvider);
     _link = ref.read(backendLinkServiceProvider);
+    _loadVoiceAutoListen();
     Future<void>(() async {
       await ref.read(ttsInitProvider.future);
       if (!mounted) return;
@@ -386,6 +393,120 @@ class _StudentLearningHubScreenState
     await tts.speak(text);
   }
 
+  // ── Screen-reader voice navigation helpers ──────────────────────────────
+
+  Future<void> _loadVoiceAutoListen() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (mounted) {
+        setState(() {
+          _voiceAutoListen = prefs.getBool(_kVoiceAutoListenKey) ?? true;
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _toggleVoiceAutoListen() async {
+    final next = !_voiceAutoListen;
+    setState(() => _voiceAutoListen = next);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kVoiceAutoListenKey, next);
+    } catch (_) {}
+    final msg = next
+        ? 'Voice auto-listen turned on. The microphone will listen for commands after announcements.'
+        : 'Voice auto-listen turned off. Double tap Voice command whenever you want to speak.';
+    if (_screenReaderOn) {
+      AccessibilityMode.announce(msg);
+    } else {
+      unawaited(_announceAndListen(msg));
+    }
+  }
+
+  Future<void> _cueListening() async {
+    try {
+      await HapticFeedback.mediumImpact();
+      await SystemSound.play(SystemSoundType.click);
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    } catch (_) {}
+  }
+
+  /// Explicit push-to-talk voice command navigation.
+  /// Available across all learning stages for screen-reader and voice-first users alike.
+  Future<void> _enterVoiceCommandMode() async {
+    if (!mounted) return;
+    final session = ++_voiceLoopSession;
+    await ref.read(sttServiceProvider).stopListening();
+    ref.read(ttsServiceProvider).stop();
+    if (_lessonPlaying) {
+      setState(() => _lessonPlaying = false);
+    }
+
+    const prompt = 'Say your command after the tone.';
+    if (_screenReaderOn) {
+      AccessibilityMode.announce(prompt);
+      await Future<void>.delayed(const Duration(milliseconds: 1400));
+    } else {
+      await ref.read(ttsServiceProvider).speakAndWait(prompt);
+      _noteSpoke(prompt);
+    }
+    if (!mounted || session != _voiceLoopSession) return;
+
+    await _cueListening();
+    if (!mounted || session != _voiceLoopSession) return;
+
+    final stt = ref.read(sttServiceProvider);
+    final ready = await stt.initialize();
+    if (!ready || !mounted || session != _voiceLoopSession) {
+      if (_screenReaderOn) {
+        AccessibilityMode.announce('Speech recognition is not available.');
+      }
+      return;
+    }
+
+    _listenStartedAt = DateTime.now();
+    var handled = false;
+
+    stt.startListening(
+      listenFor: const Duration(seconds: 15),
+      pauseFor: const Duration(seconds: 5),
+      onPartial: (words) {
+        if (handled || session != _voiceLoopSession || !mounted) return;
+        if (_isEcho(words)) return;
+        if (_tryDispatchVoiceCommand(words)) {
+          handled = true;
+          _silentWindows = 0;
+          unawaited(stt.stopListening());
+        }
+      },
+      onResult: (words) {
+        if (handled || session != _voiceLoopSession) return;
+        handled = true;
+        unawaited(stt.stopListening());
+        if (_isEcho(words) || !_tryDispatchVoiceCommand(words)) {
+          final msg = 'Command not recognised: "$words". Double tap Voice command to try again.';
+          if (_screenReaderOn) {
+            AccessibilityMode.announce(msg);
+          } else {
+            unawaited(_announceAndListen(msg));
+          }
+        } else {
+          _silentWindows = 0;
+        }
+      },
+      onDone: () {
+        if (handled || session != _voiceLoopSession) return;
+        handled = true;
+        const msg = 'Nothing heard. Double tap Voice command to try again.';
+        if (_screenReaderOn) {
+          AccessibilityMode.announce(msg);
+        } else {
+          unawaited(_announceAndListen(msg));
+        }
+      },
+    );
+  }
+
   // ── Voice-first interaction loop ────────────────────────────────────────
 
   /// Speaks [text], then opens a short listening window for a spoken command.
@@ -393,10 +514,17 @@ class _StudentLearningHubScreenState
   /// covered by [_announceCurrentState].
   Future<void> _announceAndListen(String text) async {
     if (!mounted) return;
-    // See _announceCurrentState: under a screen reader these one-off messages
-    // go through the semantics layer so TalkBack speaks them in its own voice.
+    // Under a screen reader, announce through TalkBack.
+    // When auto-listen is enabled, open a listening window once TalkBack finishes.
     if (_screenReaderOn) {
       AccessibilityMode.announce(text);
+      if (_voiceAutoListen) {
+        final wordsCount = text.split(' ').where((w) => w.isNotEmpty).length;
+        final approxMs = (wordsCount * 320).clamp(1800, 5000);
+        await Future<void>.delayed(Duration(milliseconds: approxMs));
+        if (!mounted) return;
+        await _listenForVoiceCommand(_voiceLoopSession, allowUnderScreenReader: true);
+      }
       return;
     }
     final session = ++_voiceLoopSession;
@@ -415,12 +543,17 @@ class _StudentLearningHubScreenState
   Future<void> _announceSequenceAndListen(List<String> texts) async {
     if (!mounted) return;
     // Quiz feedback ("Correct." / "The correct answer is…") reaches a TalkBack
-    // user through the semantics layer. This matters more than it looks: the
-    // result of answering is an event with no widget to focus, so without an
-    // explicit announcement the student would simply get silence at the one
-    // moment they most need to be told how they did.
+    // user through the semantics layer.
     if (_screenReaderOn) {
-      AccessibilityMode.announce(texts.join(' '));
+      final combined = texts.join(' ');
+      AccessibilityMode.announce(combined);
+      if (_voiceAutoListen) {
+        final wordsCount = combined.split(' ').where((w) => w.isNotEmpty).length;
+        final approxMs = (wordsCount * 320).clamp(1800, 6000);
+        await Future<void>.delayed(Duration(milliseconds: approxMs));
+        if (!mounted) return;
+        await _listenForVoiceCommand(_voiceLoopSession, allowUnderScreenReader: true);
+      }
       return;
     }
     final session = ++_voiceLoopSession;
@@ -445,17 +578,11 @@ class _StudentLearningHubScreenState
   /// Opens ONE listening window after an announcement. If nothing usable is
   /// heard (silence, or only our own prompt echoing back), it re-arms at most
   /// [_maxSilentWindows] times then goes quiet — a gesture or the next
-  /// announcement revives it. This deliberately does NOT loop forever or speak
-  /// reminders: continuous re-listening made the speaker's echo of command
-  /// words (e.g. "subjects", "play") trigger navigation on its own.
-  Future<void> _listenForVoiceCommand(int session) async {
+  /// announcement revives it.
+  Future<void> _listenForVoiceCommand(int session, {bool allowUnderScreenReader = false}) async {
     if (!mounted || _voiceLoopSuspended || session != _voiceLoopSession) return;
-    // Under a screen reader the microphone stays shut unless the student asks
-    // for it: TalkBack narrates continuously as they explore by touch, the mic
-    // hears that narration, and the recogniser would feed the app its own
-    // interface as commands. The "Ask a question" button still opens the mic
-    // deliberately.
-    if (_screenReaderOn) return;
+    // Under a screen reader, listen if auto-listen is active or explicitly permitted.
+    if (_screenReaderOn && !allowUnderScreenReader && !_voiceAutoListen) return;
 
     final stt = ref.read(sttServiceProvider);
     final ready = await stt.initialize();
@@ -466,11 +593,16 @@ class _StudentLearningHubScreenState
       return;
     }
 
-    // Settle gap: let the TTS audio tail fully drain before the mic opens so
+    // Settle gap: let the audio tail fully drain before the mic opens so
     // the recogniser doesn't immediately transcribe our own announcement.
     await Future<void>.delayed(const Duration(milliseconds: 450));
     if (!mounted || _voiceLoopSuspended || session != _voiceLoopSession) {
       return;
+    }
+
+    if (_screenReaderOn) {
+      await _cueListening();
+      if (!mounted || _voiceLoopSuspended || session != _voiceLoopSession) return;
     }
 
     _listenStartedAt = DateTime.now();
@@ -511,7 +643,7 @@ class _StudentLearningHubScreenState
     if (!mounted || _voiceLoopSuspended || session != _voiceLoopSession) return;
     _silentWindows++;
     if (_silentWindows >= _maxSilentWindows) return; // go quiet
-    unawaited(_listenForVoiceCommand(session));
+    unawaited(_listenForVoiceCommand(session, allowUnderScreenReader: true));
   }
 
   /// Maps a recognised phrase to the same actions gestures trigger and
@@ -1125,7 +1257,18 @@ class _StudentLearningHubScreenState
       // ONE voice, at the student's own configured rate and pitch, using the
       // engine they already know — instead of our TTS talking over theirs.
       if (_screenReaderOn) {
-        if (shouldSpeak) AccessibilityMode.announce(_announcementText());
+        if (shouldSpeak) {
+          final text = _announcementText();
+          AccessibilityMode.announce(text);
+          if (_voiceAutoListen) {
+            final wordsCount =
+                text.split(' ').where((w) => w.isNotEmpty).length;
+            final approxMs = (wordsCount * 320).clamp(1800, 5000);
+            await Future<void>.delayed(Duration(milliseconds: approxMs));
+            if (!mounted || session != _voiceLoopSession) return;
+            await _listenForVoiceCommand(session, allowUnderScreenReader: true);
+          }
+        }
         return;
       }
 
@@ -2435,6 +2578,38 @@ class _StudentLearningHubScreenState
   Widget _buildAccessibleControls() {
     final buttons = <Widget>[];
 
+    // Always available as the first button for screen-reader users:
+    // Speak any command ("next", "open", "play", "quiz", "slower", "faster", "answer two", "progress", etc.)
+    buttons.add(AccessibleActionButton(
+      label: 'Voice command',
+      hint:
+          'Double tap to speak a command, like next, previous, open, play, slower, quiz, or answer two',
+      icon: Icons.mic_rounded,
+      background: const Color(0xFF1A56DB),
+      onPressed: () {
+        _silentWindows = 0;
+        unawaited(_enterVoiceCommandMode());
+      },
+    ));
+
+    // Voice auto-listen toggle
+    buttons.add(AccessibleActionButton(
+      label: _voiceAutoListen ? 'Auto-listen: On' : 'Auto-listen: Off',
+      hint: _voiceAutoListen
+          ? 'Double tap to stop the microphone from auto-listening after announcements'
+          : 'Double tap to make the microphone auto-listen for commands after announcements',
+      icon: _voiceAutoListen
+          ? Icons.record_voice_over_rounded
+          : Icons.voice_over_off_rounded,
+      background: _voiceAutoListen
+          ? const Color(0xFF16A34A)
+          : const Color(0xFF475569),
+      onPressed: () {
+        _silentWindows = 0;
+        unawaited(_toggleVoiceAutoListen());
+      },
+    ));
+
     void add(String label, String hint, IconData icon, VoidCallback action) {
       buttons.add(AccessibleActionButton(
         label: label,
@@ -2526,7 +2701,7 @@ class _StudentLearningHubScreenState
         // into an overflow. TalkBack scrolls a focused button into view by
         // itself, so nothing here becomes unreachable by being off-screen.
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 180),
+          constraints: const BoxConstraints(maxHeight: 220),
           child: SingleChildScrollView(
             child: Wrap(spacing: 10, runSpacing: 10, children: buttons),
           ),
