@@ -2,8 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/router.dart';
+import 'shared/services/backend_api_service.dart';
 
 void main() {
+  debugPrint(
+    '[AudioApp] Starting with Backend Base URL: $kDefaultBackendBaseUrl '
+    '(custom override: $kHasCustomBackendBaseUrl)',
+  );
   runApp(
     const ProviderScope(
       child: AudioApp(),

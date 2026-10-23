@@ -48,6 +48,14 @@ class ReviewQuestion {
 /// Talks to the backend's teacher question-review endpoints. Self-contained
 /// (uses `http` directly) so it stays decoupled from the large API service.
 class TeacherReviewService {
+  String _norm(String base) {
+    var raw = base.trim();
+    if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+      raw = 'https://$raw';
+    }
+    return raw.endsWith('/') ? raw.substring(0, raw.length - 1) : raw;
+  }
+
   Map<String, String> _headers(String token) => {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
@@ -63,7 +71,7 @@ class TeacherReviewService {
   }) async {
     final res = await http
         .get(
-          Uri.parse('$baseUrl/api/v1/notes/$noteId/questions'),
+          Uri.parse('${_norm(baseUrl)}/api/v1/notes/$noteId/questions'),
           headers: _headers(token),
         )
         .timeout(const Duration(seconds: 30));
@@ -87,7 +95,7 @@ class TeacherReviewService {
   }) async {
     final res = await http
         .post(
-          Uri.parse('$baseUrl/api/v1/questions/$id/approve'),
+          Uri.parse('${_norm(baseUrl)}/api/v1/questions/$id/approve'),
           headers: _headers(token),
           body: jsonEncode({'approved': approved}),
         )
@@ -108,7 +116,7 @@ class TeacherReviewService {
   }) async {
     final res = await http
         .patch(
-          Uri.parse('$baseUrl/api/v1/questions/$id'),
+          Uri.parse('${_norm(baseUrl)}/api/v1/questions/$id'),
           headers: _headers(token),
           body: jsonEncode({
             'question_text': questionText,
@@ -130,7 +138,7 @@ class TeacherReviewService {
   }) async {
     final res = await http
         .delete(
-          Uri.parse('$baseUrl/api/v1/questions/$id'),
+          Uri.parse('${_norm(baseUrl)}/api/v1/questions/$id'),
           headers: _headers(token),
         )
         .timeout(const Duration(seconds: 30));

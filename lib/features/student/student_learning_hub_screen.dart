@@ -67,6 +67,12 @@ class _StudentLearningHubScreenState
   int _silentWindows = 0;
   static const int _maxSilentWindows = 3;
 
+  // When true the microphone has been silently retired after [_maxSilentWindows]
+  // consecutive empty windows. A single tap anywhere on the screen wakes it
+  // back up (see _onTap / _wakeVoiceFromSleep). This prevents the phone from
+  // sitting in dead silence with no indication the mic is off.
+  bool _voiceSleeping = false;
+
   // ── Screen-reader voice interaction ─────────────────────────────────────
   // Allows TalkBack users to either auto-listen for commands after announcements
   // or use the explicit "Voice command" push-to-talk button.
@@ -636,14 +642,48 @@ class _StudentLearningHubScreenState
     );
   }
 
-  /// Re-arms the single listening window a bounded number of times, then stops.
-  /// No spoken reminder, no infinite loop — keeps voice available briefly while
-  /// preventing echo-driven runaway listening.
+  /// Re-arms the single listening window a bounded number of times, then
+  /// enters a gentle "mic sleep" state. When budget is exhausted the student
+  /// hears a one-time spoken notice ("Microphone paused. Tap to speak."), a
+  /// haptic pulse is fired, and [_voiceSleeping] is set to true. A single tap
+  /// anywhere on the screen then calls [_wakeVoiceFromSleep] to reopen the
+  /// microphone without replaying the full announcement.
   void _retryListen(int session) {
     if (!mounted || _voiceLoopSuspended || session != _voiceLoopSession) return;
     _silentWindows++;
-    if (_silentWindows >= _maxSilentWindows) return; // go quiet
+    if (_silentWindows >= _maxSilentWindows) {
+      _voiceSleeping = true;
+      // One-time spoken nudge so the student knows what happened and how to
+      // recover. Deliberately kept short — it should not re-trigger listening.
+      const notice = 'Microphone paused. Tap anywhere to speak.';
+      if (_screenReaderOn) {
+        AccessibilityMode.announce(notice);
+      } else {
+        unawaited(() async {
+          await HapticFeedback.mediumImpact();
+          final tts = ref.read(ttsServiceProvider);
+          await tts.speakAndWait(notice);
+        }());
+      }
+      return;
+    }
     unawaited(_listenForVoiceCommand(session, allowUnderScreenReader: true));
+  }
+
+  /// Wakes the microphone after it entered the sleep state. Resets the silent
+  /// window budget, clears [_voiceSleeping], plays the listen cue, then opens
+  /// a fresh voice command window. Safe to call even when the mic is not
+  /// sleeping (it becomes a standard forced re-arm in that case).
+  void _wakeVoiceFromSleep() {
+    if (!mounted || _voiceLoopSuspended) return;
+    _voiceSleeping = false;
+    _silentWindows = 0;
+    final session = ++_voiceLoopSession;
+    unawaited(() async {
+      await _cueListening();
+      if (!mounted || session != _voiceLoopSession) return;
+      await _listenForVoiceCommand(session, allowUnderScreenReader: true);
+    }());
   }
 
   /// Maps a recognised phrase to the same actions gestures trigger and
@@ -980,6 +1020,7 @@ class _StudentLearningHubScreenState
   /// comprehend dense notes. (Two-finger tap = faster; voice works for both.)
   void _onLongPress() {
     _silentWindows = 0;
+    _voiceSleeping = false;
     HapticFeedback.selectionClick();
     unawaited(_changeSpeechRate(slower: true));
   }
@@ -1247,6 +1288,7 @@ class _StudentLearningHubScreenState
     // A state change or explicit re-announcement means the student is active
     // again — give the silent-window budget back in full.
     _silentWindows = 0;
+    _voiceSleeping = false;
 
     final session = ++_voiceLoopSession;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -1436,8 +1478,22 @@ class _StudentLearningHubScreenState
 
     final next = _topicIndex + delta;
     if (next < 0) {
+      // Swiping left past the first topic navigates back to the subjects list,
+      // giving gesture users a complete back-chain without needing voice or the
+      // Android back button. Matches what the "back" voice command does.
       HapticFeedback.heavyImpact();
-      unawaited(_announceAndListen('First topic.'));
+      final wasInLesson = _stage == LearningStage.lesson ||
+          _stage == LearningStage.quizConfirm ||
+          _stage == LearningStage.quiz;
+      if (wasInLesson) unawaited(_endVoiceSession());
+      setState(() {
+        _stage = LearningStage.subjects;
+        _lessonPlaying = false;
+        _quizAnswered = false;
+        _quizComplete = false;
+        _score = 0;
+      });
+      _announceCurrentState(force: true);
       return;
     }
     if (next >= topics.length) {
@@ -2241,8 +2297,22 @@ class _StudentLearningHubScreenState
         );
   }
 
+  /// Single-tap handler. When the microphone has been retired to sleep after
+  /// too many silent windows, a tap anywhere wakes it back up — giving the
+  /// student a reliable, zero-UI recovery that works even under TalkBack
+  /// (where TalkBack will fire the focused element's tap action, but a second
+  /// tap on the background GestureDetector still reaches here). In every other
+  /// state the tap is intentionally ignored so it doesn't accidentally override
+  /// double-tap or long-press interactions.
+  void _onTap() {
+    if (_voiceSleeping) {
+      _wakeVoiceFromSleep();
+    }
+  }
+
   void _onSwipeRight() {
     _silentWindows = 0;
+    _voiceSleeping = false;
     HapticFeedback.selectionClick();
     switch (_stage) {
       case LearningStage.subjects:
@@ -2255,6 +2325,9 @@ class _StudentLearningHubScreenState
         _moveTopic(1);
         break;
       case LearningStage.quizConfirm:
+        // Swipe right on the confirmation screen starts the quiz,
+        // mirroring the double-tap action so gesture users aren't blocked.
+        _startQuiz();
         break;
       case LearningStage.quiz:
         if (_quizAnswered) {
@@ -2268,6 +2341,7 @@ class _StudentLearningHubScreenState
 
   void _onSwipeLeft() {
     _silentWindows = 0;
+    _voiceSleeping = false;
     HapticFeedback.selectionClick();
     switch (_stage) {
       case LearningStage.subjects:
@@ -2303,6 +2377,7 @@ class _StudentLearningHubScreenState
 
   void _onSwipeUp() {
     _silentWindows = 0;
+    _voiceSleeping = false;
     HapticFeedback.selectionClick();
     if (_stage == LearningStage.lesson) {
       _replayLesson();
@@ -2314,14 +2389,20 @@ class _StudentLearningHubScreenState
 
   void _onSwipeDown() {
     _silentWindows = 0;
+    _voiceSleeping = false;
     HapticFeedback.selectionClick();
     if (_stage == LearningStage.lesson) {
       _openQuizConfirmation();
+    } else if (_stage == LearningStage.quizConfirm) {
+      // Swipe down on the confirm screen starts the quiz (mirrors swipe right
+      // and double-tap so the student has multiple gesture paths forward).
+      _startQuiz();
     }
   }
 
   void _onDoubleTap() {
     _silentWindows = 0;
+    _voiceSleeping = false;
     HapticFeedback.selectionClick();
     switch (_stage) {
       case LearningStage.subjects:
@@ -2392,6 +2473,7 @@ class _StudentLearningHubScreenState
           onPointerCancel: _onPointerEnd,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
+            onTap: _onTap,
             onDoubleTap: _onDoubleTap,
             onLongPress: _onLongPress,
             onHorizontalDragEnd: (details) {
@@ -3631,6 +3713,16 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
     switch (_stage) {
       case _JoinStage.intro:
         unawaited(_beginNameCapture());
+        break;
+      case _JoinStage.askName:
+        // Tapping during active STT for name re-triggers the name prompt.
+        // This covers the case where the mic timed out silently and the student
+        // has no gesture path to retry without voice.
+        unawaited(_beginNameCapture());
+        break;
+      case _JoinStage.askCode:
+        // Same recovery for the class-code STT window.
+        unawaited(_beginCodeCapture());
         break;
       case _JoinStage.confirmName:
         _confirmName(correct: true);

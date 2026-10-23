@@ -21,10 +21,27 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// free tier sleeps after ~15 minutes idle; Railway sleeps only on the trial
 /// plan). Fire [BackendApiService.warmUp] early — e.g. on the role-selection
 /// screen — so the instance is awake before a student joins a class or syncs.
-const String kDefaultBackendBaseUrl = String.fromEnvironment(
-  'BACKEND_BASE_URL',
-  defaultValue: 'https://audiolearner.kyalopulse.com',
-);
+const bool _hasBaseUrl = bool.hasEnvironment('BASE_URL');
+const bool _hasBackendBaseUrl = bool.hasEnvironment('BACKEND_BASE_URL');
+
+/// True when a custom base URL was injected at build/run time via either
+/// `--dart-define=BASE_URL=...` or `--dart-define=BACKEND_BASE_URL=...`.
+const bool kHasCustomBackendBaseUrl = _hasBaseUrl || _hasBackendBaseUrl;
+
+/// Default deployment of the AudioLearner backend.
+///
+/// Overridable at build time via either `--dart-define=BASE_URL=...` or
+/// `--dart-define=BACKEND_BASE_URL=...`, so one codebase can target any host
+/// without editing source:
+///
+///     flutter run --dart-define=BASE_URL=https://visiolearn-backend-2.onrender.com
+///
+/// If no define is supplied, it safely falls back to the default production URL.
+const String kDefaultBackendBaseUrl = _hasBaseUrl
+    ? String.fromEnvironment('BASE_URL')
+    : (_hasBackendBaseUrl
+        ? String.fromEnvironment('BACKEND_BASE_URL')
+        : 'https://audiolearner.kyalopulse.com');
 
 class BackendApiException implements Exception {
   BackendApiException(this.message, {this.statusCode});
@@ -406,10 +423,18 @@ class BackendApiService {
       HttpClient()..connectionTimeout = const Duration(seconds: 15);
 
   Uri _uri(String baseUrl, String path, [Map<String, String>? query]) {
-    final normalized = baseUrl.endsWith('/')
-        ? baseUrl.substring(0, baseUrl.length - 1)
-        : baseUrl;
-    return Uri.parse('$normalized$path').replace(queryParameters: query);
+    var raw = baseUrl.trim();
+    if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+      raw = 'https://$raw';
+    }
+    final normalized = raw.endsWith('/')
+        ? raw.substring(0, raw.length - 1)
+        : raw;
+    final parsed = Uri.parse('$normalized$path');
+    return parsed.replace(
+      host: parsed.host.toLowerCase(),
+      queryParameters: query,
+    );
   }
 
   bool _isSuccess(int code) => code >= 200 && code < 300;
@@ -448,6 +473,7 @@ class BackendApiService {
     try {
       late HttpClientRequest request;
       final uri = _uri(baseUrl, path, query);
+      debugPrint('[BackendApiService] $method $uri');
       switch (method.toUpperCase()) {
         case 'GET':
           request = await client.getUrl(uri);
@@ -496,6 +522,11 @@ class BackendApiService {
           'The server is taking too long to respond. It may be waking up — '
           'please try again in a minute.');
     } on SocketException catch (e) {
+      if (e.message.contains('Failed host lookup')) {
+        throw BackendApiException(
+          'Could not reach server ($baseUrl). Please check this phone\'s internet connection or Wi-Fi.',
+        );
+      }
       throw BackendApiException('Network error: ${e.message}');
     } on HandshakeException {
       throw BackendApiException(
@@ -511,14 +542,18 @@ class BackendApiService {
   /// swallows every failure — being offline must never surface an error from
   /// a warm-up. Returns `true` when the backend answered.
   Future<bool> warmUp({String baseUrl = kDefaultBackendBaseUrl}) async {
+    debugPrint('[BackendApiService] Warming up backend at $baseUrl');
     try {
       final (statusCode, _) = await _sendJson(
         method: 'GET',
         baseUrl: baseUrl,
         path: '/',
       ).timeout(const Duration(seconds: 75));
-      return _isSuccess(statusCode);
-    } catch (_) {
+      final awake = _isSuccess(statusCode);
+      debugPrint('[BackendApiService] Warm-up finished (status: $statusCode, awake: $awake)');
+      return awake;
+    } catch (e) {
+      debugPrint('[BackendApiService] Warm-up error: $e');
       return false;
     }
   }
@@ -1393,6 +1428,11 @@ class BackendApiService {
       }
       return BackendNote.fromJson(parsed);
     } on SocketException catch (e) {
+      if (e.message.contains('Failed host lookup')) {
+        throw BackendApiException(
+          'Could not reach server during upload. Please check your internet connection.',
+        );
+      }
       throw BackendApiException('Network error during upload: ${e.message}');
     }
   }

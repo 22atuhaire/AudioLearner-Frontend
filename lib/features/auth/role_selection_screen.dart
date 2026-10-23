@@ -226,8 +226,15 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
       },
       child: Scaffold(
         backgroundColor: const Color(0xFFEBF2FF),
-        body: Stack(
-          children: [
+        body: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {
+            if (!_navigated) {
+              unawaited(_listenForRole());
+            }
+          },
+          child: Stack(
+            children: [
             // ── Main content area with welcome message ───────────────────
             const SafeArea(
               child: SizedBox.expand(
@@ -408,6 +415,7 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
         ),
           ],
         ),
+      ),
       ),
     );
   }

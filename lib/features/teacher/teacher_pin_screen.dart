@@ -166,7 +166,15 @@ class _TeacherPinScreenState extends ConsumerState<TeacherPinScreen> {
       if (teacher != null) await showTeacherLinkDialog(context, teacher);
       if (mounted) context.go('/teacher/dashboard');
     } on BackendApiException catch (e) {
-      _fail('${e.message} If you already have an account, switch to Sign in.');
+      final msg = e.message.toLowerCase();
+      if (e.statusCode == 400 ||
+          e.statusCode == 409 ||
+          msg.contains('already exists') ||
+          msg.contains('registered')) {
+        _fail('${e.message} If you already have an account, switch to Sign in.');
+      } else {
+        _fail(e.message);
+      }
     } catch (_) {
       _fail('Could not reach the server. Check your connection and try again.');
     }

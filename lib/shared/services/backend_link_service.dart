@@ -73,8 +73,12 @@ class TeacherLinkInfo {
       };
 
   factory TeacherLinkInfo.fromJson(Map<String, dynamic> json) {
+    final saved = json['baseUrl']?.toString() ?? '';
+    final effective = kHasCustomBackendBaseUrl || saved.isEmpty
+        ? kDefaultBackendBaseUrl
+        : saved;
     return TeacherLinkInfo(
-      baseUrl: json['baseUrl']?.toString() ?? '',
+      baseUrl: effective,
       email: json['email']?.toString() ?? '',
       password: json['password']?.toString() ?? '',
       accessToken: json['accessToken']?.toString() ?? '',
@@ -146,8 +150,12 @@ class StudentLinkInfo {
       };
 
   factory StudentLinkInfo.fromJson(Map<String, dynamic> json) {
+    final saved = json['baseUrl']?.toString() ?? '';
+    final effective = kHasCustomBackendBaseUrl || saved.isEmpty
+        ? kDefaultBackendBaseUrl
+        : saved;
     return StudentLinkInfo(
-      baseUrl: json['baseUrl']?.toString() ?? '',
+      baseUrl: effective,
       email: json['email']?.toString() ?? '',
       password: json['password']?.toString() ?? '',
       accessToken: json['accessToken']?.toString() ?? '',
