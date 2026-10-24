@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:audioapp/shared/services/accessibility_service.dart';
 import 'package:audioapp/shared/services/db/app_database.dart';
 import 'package:audioapp/shared/services/providers.dart';
 import 'package:audioapp/shared/services/stt_service.dart';
@@ -86,6 +87,13 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
       _students = students;
       _loading = false;
     });
+
+    if (AccessibilityMode.isScreenReaderActive) {
+      AccessibilityMode.announce(
+        'Student login. Choose your name from the list or tap New Student.',
+      );
+      return;
+    }
 
     if (!ready) {
       await ref.read(ttsServiceProvider).speak(
@@ -380,9 +388,13 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(kActiveStudentIdKey, student.id);
     if (!mounted) return;
-    await ref
-        .read(ttsServiceProvider)
-        .speakAndWait('Welcome, ${student.name}.');
+    if (AccessibilityMode.isScreenReaderActive) {
+      AccessibilityMode.announce('Welcome, ${student.name}.');
+    } else {
+      await ref
+          .read(ttsServiceProvider)
+          .speakAndWait('Welcome, ${student.name}.');
+    }
     if (!mounted) return;
     context.go('/student/home');
   }
@@ -494,7 +506,19 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
         body: Center(child: CircularProgressIndicator()),
       );
     }
-    return Scaffold(
+    return PopScope(
+      canPop: !_addingNew,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (_addingNew) {
+          FocusScope.of(context).unfocus();
+          setState(() => _addingNew = false);
+          if (AccessibilityMode.isScreenReaderActive) {
+            AccessibilityMode.announce('Cancelled. Returning to student list.');
+          }
+        }
+      },
+      child: Scaffold(
       backgroundColor: const Color(0xFFEBF2FF),
       // Tap-anywhere recovery, active ONLY after voice has given up. A blind
       // pupil cannot find the buttons below, so without this the screen was a
@@ -536,16 +560,75 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
                     controller: _nameController,
                     autofocus: true,
                     textCapitalization: TextCapitalization.words,
+                    textInputAction: TextInputAction.done,
+                    onEditingComplete: () {
+                      FocusScope.of(context).unfocus();
+                      _submitTypedName();
+                    },
                     decoration: const InputDecoration(
                       labelText: 'Student name',
+                      hintText: 'Enter student name',
                       border: OutlineInputBorder(),
                     ),
-                    onSubmitted: (_) => _submitTypedName(),
+                    onSubmitted: (_) {
+                      FocusScope.of(context).unfocus();
+                      _submitTypedName();
+                    },
                   ),
                   const SizedBox(height: 12),
-                  ElevatedButton(
-                    onPressed: _submitTypedName,
-                    child: const Text('Start learning'),
+                  Semantics(
+                    button: true,
+                    label: 'Start learning',
+                    hint: 'Double tap to save name and start learning',
+                    onTap: _submitTypedName,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(56),
+                        backgroundColor: const Color(0xFF1A56DB),
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: _submitTypedName,
+                      child: const Text(
+                        'Start learning',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Semantics(
+                    button: true,
+                    label: 'Close keyboard',
+                    hint: 'Double tap to dismiss keyboard',
+                    onTap: () => FocusScope.of(context).unfocus(),
+                    child: TextButton.icon(
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                        foregroundColor: const Color(0xFF475569),
+                      ),
+                      icon: const Icon(Icons.keyboard_hide_rounded),
+                      label: const Text('Close keyboard'),
+                      onPressed: () => FocusScope.of(context).unfocus(),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Semantics(
+                    button: true,
+                    label: 'Cancel and back to student list',
+                    hint: 'Double tap to cancel and return to student list',
+                    onTap: () {
+                      FocusScope.of(context).unfocus();
+                      setState(() => _addingNew = false);
+                    },
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                      onPressed: () {
+                        FocusScope.of(context).unfocus();
+                        setState(() => _addingNew = false);
+                      },
+                      child: const Text('Back to student list'),
+                    ),
                   ),
                 ] else ...[
                   Expanded(
@@ -570,10 +653,21 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
                       ],
                     ),
                   ),
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.add),
-                    label: const Text('New student'),
-                    onPressed: () => setState(() => _addingNew = true),
+                  Semantics(
+                    button: true,
+                    label: 'New student',
+                    hint: 'Double tap to add a new student name',
+                    onTap: () => setState(() => _addingNew = true),
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(56),
+                        padding: const EdgeInsets.all(16),
+                        textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                      ),
+                      icon: const Icon(Icons.add_rounded, size: 24),
+                      label: const Text('New student'),
+                      onPressed: () => setState(() => _addingNew = true),
+                    ),
                   ),
                 ],
               ],
@@ -581,12 +675,19 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
           ),
         ),
       ),
+    ),
     );
   }
 
   Future<void> _submitTypedName() async {
+    FocusScope.of(context).unfocus();
     final name = _titleCase(_nameController.text);
-    if (_normalize(name).isEmpty) return;
+    if (_normalize(name).isEmpty) {
+      if (AccessibilityMode.isScreenReaderActive) {
+        AccessibilityMode.announce('Please enter your name first.');
+      }
+      return;
+    }
     final (best, score) = _bestMatch(name);
     if (best != null && score >= 0.92) {
       await _login(best);

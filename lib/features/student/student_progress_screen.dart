@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:audioapp/shared/services/accessibility_service.dart';
 import 'package:audioapp/shared/services/progress_summary_service.dart';
 import 'package:audioapp/shared/services/providers.dart';
 import 'package:audioapp/shared/services/stt_service.dart';
@@ -98,6 +99,10 @@ class _StudentProgressScreenState extends ConsumerState<StudentProgressScreen> {
   /// Speaks [text], then opens a bounded listening window for "back" / "repeat"
   /// so the student is never trapped on this screen.
   Future<void> _sayThenListen(String text) async {
+    if (AccessibilityMode.isScreenReaderActive) {
+      AccessibilityMode.announce(text);
+      return;
+    }
     final session = ++_listenSession;
     await ref.read(sttServiceProvider).stopListening();
     if (!mounted || session != _listenSession) return;
@@ -178,19 +183,36 @@ class _StudentProgressScreenState extends ConsumerState<StudentProgressScreen> {
           backgroundColor: const Color(0xFF1A56DB),
           foregroundColor: Colors.white,
           elevation: 0,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            tooltip: 'Back to learning',
-            onPressed: _goBack,
+          leading: Semantics(
+            button: true,
+            label: 'Back to learning',
+            hint: 'Double tap to return to learning hub',
+            onTap: _goBack,
+            excludeSemantics: true,
+            child: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              tooltip: 'Back to learning',
+              onPressed: _goBack,
+            ),
           ),
           actions: [
-            IconButton(
-              icon: const Icon(Icons.mic_rounded),
-              tooltip: 'Voice command. Double tap to speak.',
-              onPressed: () {
+            Semantics(
+              button: true,
+              label: 'Voice command',
+              hint: 'Double tap to speak a command like back or repeat',
+              onTap: () {
                 _silentWindows = 0;
                 _listenForCommand(++_listenSession);
               },
+              excludeSemantics: true,
+              child: IconButton(
+                icon: const Icon(Icons.mic_rounded),
+                tooltip: 'Voice command. Double tap to speak.',
+                onPressed: () {
+                  _silentWindows = 0;
+                  _listenForCommand(++_listenSession);
+                },
+              ),
             ),
           ],
         ),

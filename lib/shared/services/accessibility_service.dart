@@ -128,6 +128,7 @@ class AccessibleActionButton extends StatelessWidget {
       button: true,
       label: label,
       hint: hint,
+      onTap: onPressed,
       child: ExcludeSemantics(
         child: Material(
           color: background,

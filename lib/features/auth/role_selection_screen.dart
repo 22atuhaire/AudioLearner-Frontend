@@ -62,12 +62,9 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
           'top right.';
       // Let TalkBack speak this if it is running, rather than talking over it.
       if (AccessibilityMode.isScreenReaderActive) {
-        AccessibilityMode.announce(welcome);
-        // Wait for the welcome announcement to complete, then listen for role
-        await Future<void>.delayed(const Duration(milliseconds: 4500));
-        if (mounted && !_navigated) {
-          unawaited(_listenForRole());
-        }
+        AccessibilityMode.announce(
+          'Welcome to Audio Learner. Double tap Student at the bottom of the screen to start learning, or double tap Teacher at the top right.',
+        );
         return;
       }
 
@@ -356,6 +353,17 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
               child: Semantics(
                 button: true,
                 label: 'Student mode. Double-tap to enter as student.',
+                onTap: () {
+                  _navigated = true;
+                  unawaited(ref.read(sttServiceProvider).stopListening());
+                  if (AccessibilityMode.isScreenReaderActive) {
+                    AccessibilityMode.announce(
+                        'Student selected. Opening the learner screen.');
+                  } else {
+                    _speak('Student selected. Opening the learner screen.');
+                  }
+                  context.go('/student/pin');
+                },
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(

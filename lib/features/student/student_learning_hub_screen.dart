@@ -76,7 +76,7 @@ class _StudentLearningHubScreenState
   // ── Screen-reader voice interaction ─────────────────────────────────────
   // Allows TalkBack users to either auto-listen for commands after announcements
   // or use the explicit "Voice command" push-to-talk button.
-  bool _voiceAutoListen = true;
+  bool _voiceAutoListen = false;
   static const String _kVoiceAutoListenKey = 'voice_auto_listen_screen_reader';
 
   // ── Echo guard ──────────────────────────────────────────────────────────
@@ -266,8 +266,12 @@ class _StudentLearningHubScreenState
           const hint = 'To get lessons from your teacher, tap the top of the '
               'screen to join a class. Or keep learning with the lessons '
               'already on this phone.';
-          await ref.read(ttsServiceProvider).speakAndWait(hint);
-          _noteSpoke(hint);
+          if (_screenReaderOn) {
+            AccessibilityMode.announce(hint);
+          } else {
+            await ref.read(ttsServiceProvider).speakAndWait(hint);
+            _noteSpoke(hint);
+          }
           if (mounted) _announceCurrentState(force: true);
         }
         return;
@@ -395,6 +399,10 @@ class _StudentLearningHubScreenState
   }
 
   Future<void> _speak(String text) async {
+    if (_screenReaderOn) {
+      AccessibilityMode.announce(text);
+      return;
+    }
     final tts = ref.read(ttsServiceProvider);
     await tts.speak(text);
   }
@@ -406,7 +414,7 @@ class _StudentLearningHubScreenState
       final prefs = await SharedPreferences.getInstance();
       if (mounted) {
         setState(() {
-          _voiceAutoListen = prefs.getBool(_kVoiceAutoListenKey) ?? true;
+          _voiceAutoListen = prefs.getBool(_kVoiceAutoListenKey) ?? false;
         });
       }
     } catch (_) {}
@@ -1300,7 +1308,7 @@ class _StudentLearningHubScreenState
       // engine they already know — instead of our TTS talking over theirs.
       if (_screenReaderOn) {
         if (shouldSpeak) {
-          final text = _announcementText();
+          final text = _screenReaderAnnouncementText();
           AccessibilityMode.announce(text);
           if (_voiceAutoListen) {
             final wordsCount =
@@ -1325,6 +1333,38 @@ class _StudentLearningHubScreenState
       if (!mounted || session != _voiceLoopSession) return;
       await _listenForVoiceCommand(session);
     });
+  }
+
+  String _screenReaderAnnouncementText() {
+    final subjects = _subjects();
+    if (subjects.isEmpty) {
+      return 'No subjects available. Tap join class at the top to join a class.';
+    }
+
+    final subject = subjects[_subjectIndex.clamp(0, subjects.length - 1)];
+    final topics = _topicsForSubject(subject);
+
+    switch (_stage) {
+      case LearningStage.subjects:
+        return '${subject.name}. ${_subjectIndex + 1} of ${subjects.length}.';
+      case LearningStage.topics:
+        if (topics.isEmpty) return 'No topics available.';
+        final topic = topics[_topicIndex.clamp(0, topics.length - 1)];
+        return '${topic.name}. ${_topicIndex + 1} of ${topics.length}.';
+      case LearningStage.lesson:
+        if (topics.isEmpty) return 'No lesson available.';
+        final topic = topics[_topicIndex.clamp(0, topics.length - 1)];
+        return '${topic.name}. Ready to play.';
+      case LearningStage.quizConfirm:
+        return 'Ready for quiz. Double tap to begin.';
+      case LearningStage.quiz:
+        if (_quizComplete) {
+          return 'Quiz complete. Score $_score of ${_questionsCount()}.';
+        }
+        final question = _currentQuizQuestion();
+        if (question == null) return 'No questions available.';
+        return 'Question ${_questionIndex + 1} of ${_questionsCount()}. ${question.questionText}.';
+    }
   }
 
   String _announcementText() {
@@ -1638,6 +1678,17 @@ class _StudentLearningHubScreenState
     await ref.read(sttServiceProvider).stopListening();
     if (!mounted || session != _voiceLoopSession || !_lessonPlaying) return;
 
+    // Settle delay under screen reader: TalkBack's activation click or button
+    // announcement may still be completing. Without this settle delay, Android's
+    // TTS audio focus request collides with TalkBack and fails immediately,
+    // causing speakAndWait to return false.
+    if (_screenReaderOn) {
+      // 500ms settle delay gives TalkBack's button click feedback and focus
+      // announcement time to finish completely before Flutter TTS speaks lesson audio.
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      if (!mounted || session != _voiceLoopSession || !_lessonPlaying) return;
+    }
+
     // Safety net: never let a play action fall straight through to "end of
     // lesson". If segmentation produced nothing (e.g. a lesson whose text was
     // only headings/separators), speak the raw lesson text once instead of
@@ -1651,7 +1702,13 @@ class _StudentLearningHubScreenState
             _announceAndListen('This lesson has no content to read yet.'));
         return;
       }
-      final ok = await tts.speakAndWait(raw);
+      var ok = await tts.speakAndWait(raw);
+      if (!ok && _screenReaderOn && mounted && session == _voiceLoopSession && _lessonPlaying) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        if (mounted && session == _voiceLoopSession && _lessonPlaying) {
+          ok = await tts.speakAndWait(raw);
+        }
+      }
       if (!mounted || session != _voiceLoopSession || !_lessonPlaying) return;
       if (ok && lesson != null) unawaited(_recordLessonCompleted(lesson.id));
       if (mounted) setState(() => _lessonPlaying = false);
@@ -1680,7 +1737,14 @@ class _StudentLearningHubScreenState
           (i == startIndex) ? startCharOffset.clamp(0, segmentText.length) : 0;
       final toSpeak = base == 0 ? segmentText : segmentText.substring(base);
 
-      final completed = await tts.speakAndWait(toSpeak);
+      var completed = await tts.speakAndWait(toSpeak);
+      if (!completed && _screenReaderOn && mounted && session == _voiceLoopSession && _lessonPlaying) {
+        // If TalkBack was still speaking and cancelled the utterance, retry once
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        if (mounted && session == _voiceLoopSession && _lessonPlaying) {
+          completed = await tts.speakAndWait(toSpeak);
+        }
+      }
 
       // Interrupted (paused, navigated, or superseded): remember exactly where
       // so the next play resumes from this word, not the segment start.
@@ -1690,7 +1754,11 @@ class _StudentLearningHubScreenState
         return;
       }
       if (!completed) {
-        // Engine error mid-segment — stop cleanly rather than skipping ahead.
+        // Engine error mid-segment — stop cleanly and announce error under screen reader
+        if (mounted) setState(() => _lessonPlaying = false);
+        if (_screenReaderOn) {
+          AccessibilityMode.announce('Could not play lesson audio. Tap Play to try again.');
+        }
         return;
       }
 
@@ -1733,7 +1801,12 @@ class _StudentLearningHubScreenState
     final tts = ref.read(ttsServiceProvider);
     await ref.read(sttServiceProvider).stopListening();
     if (!mounted || session != _voiceLoopSession) return;
-    await tts.speakAndWait(label);
+    if (_screenReaderOn) {
+      AccessibilityMode.announce(label);
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    } else {
+      await tts.speakAndWait(label);
+    }
     if (!mounted || session != _voiceLoopSession || !_lessonPlaying) return;
     await _playLessonFrom(
       session,
@@ -1802,6 +1875,17 @@ class _StudentLearningHubScreenState
 
     unawaited(_announceAndListen(
         'Option ${_answerIndex + 1}. ${options[_answerIndex].text}'));
+  }
+
+  Future<void> _selectQuizOption(int index) async {
+    final question = _currentQuizQuestion();
+    if (question == null) return;
+    final options = _quizOptions(question);
+    if (options.isEmpty) return;
+    if (_quizAnswered || _quizComplete) return;
+
+    setState(() => _answerIndex = index.clamp(0, options.length - 1));
+    await _selectQuizAnswer();
   }
 
   Future<void> _selectQuizAnswer() async {
@@ -1920,16 +2004,14 @@ class _StudentLearningHubScreenState
     _announceCurrentState(force: true);
   }
 
-  Widget _stageCard({
-    required IconData icon,
-    required Color accent,
-    required String title,
-    required String subtitle,
-    required String hint,
-    String? progress,
-    String? actionLabel,
-    String? body,
+  Widget _buildQuizCard({
+    required Question question,
+    required List<_QuizOption> options,
+    required int questionsCount,
   }) {
+    final isLast = _questionIndex >= questionsCount - 1;
+    const accent = Color(0xFF1A56DB);
+
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -1937,7 +2019,7 @@ class _StudentLearningHubScreenState
           end: Alignment.bottomRight,
           colors: [
             accent.withValues(alpha: 0.18),
-            accent.withValues(alpha: 0.05)
+            accent.withValues(alpha: 0.05),
           ],
         ),
         borderRadius: BorderRadius.circular(28),
@@ -1950,109 +2032,417 @@ class _StudentLearningHubScreenState
         ],
       ),
       padding: const EdgeInsets.all(20),
-      // Scrollable, but still vertically centred when there is room.
-      //
-      // Two things legitimately shrink this card's space: the screen-reader
-      // control panel below it, and a large system font scale — which the
-      // low-vision students this app serves very often have turned on. Either
-      // one previously produced a RenderFlex overflow and clipped content off
-      // the bottom, invisibly. A fixed Column cannot express "centre if you
-      // fit, scroll if you don't"; this can.
       child: LayoutBuilder(
         builder: (context, constraints) => SingleChildScrollView(
           child: ConstrainedBox(
             constraints: BoxConstraints(minHeight: constraints.maxHeight),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              // min + the minHeight above: the Column hugs its content, and
-              // the constraint stretches it to fill only when there is spare
-              // room, so centring still works without forcing an overflow.
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.16),
-                    shape: BoxShape.circle,
+                // Top header: question progress (decorative, announced in header below)
+                ExcludeSemantics(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: accent.withValues(alpha: 0.16),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.quiz_rounded, color: accent, size: 28),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        'Question ${_questionIndex + 1} of $questionsCount',
+                        style: const TextStyle(
+                          color: accent,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.1,
+                        ),
+                      ),
+                    ],
                   ),
-                  child: Icon(icon, color: accent, size: 40),
+                ),
+                const SizedBox(height: 14),
+                // Question text
+                Semantics(
+                  header: true,
+                  label: 'Question ${_questionIndex + 1} of $questionsCount: ${question.questionText}',
+                  excludeSemantics: true,
+                  child: Text(
+                    question.questionText,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF123B7A),
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      height: 1.25,
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 16),
-                if (progress != null) ...[
-                  Text(
-                    progress,
-                    style: TextStyle(
-                      color: accent,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.1,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                Text(
-                  title,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: accent,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w900,
-                    height: 1.1,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  subtitle,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.grey.shade700,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    height: 1.4,
-                  ),
-                ),
-                if (body != null) ...[
+
+                // If already answered, show feedback and next question action
+                if (_quizAnswered) ...[
+                  Builder(builder: (context) {
+                    final selected = options[_answerIndex.clamp(0, options.length - 1)];
+                    final selectedIndex = options.indexOf(selected);
+                    final boundedIndex =
+                        selectedIndex < 0 ? 0 : selectedIndex > 3 ? 3 : selectedIndex;
+                    final selectedLetter = const ['A', 'B', 'C', 'D'][boundedIndex];
+                    final correct = question.correctOption.toUpperCase() == selectedLetter;
+                    final correctLetter = question.correctOption.toUpperCase();
+                    final correctText = (switch (correctLetter) {
+                      'A' => question.optionA,
+                      'B' => question.optionB,
+                      'C' => question.optionC,
+                      'D' => question.optionD ?? '',
+                      _ => '',
+                    }).trim();
+
+                    return Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: correct
+                            ? const Color(0xFF16A34A).withValues(alpha: 0.12)
+                            : const Color(0xFFDC2626).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: correct ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                correct ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                                color: correct ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                                size: 28,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                correct ? 'Correct!' : 'Incorrect',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w900,
+                                  color: correct ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (!correct && correctText.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              'Correct answer: Option $correctLetter: $correctText',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF1F2937),
+                              ),
+                            ),
+                          ],
+                          if (question.explanation.trim().isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              question.explanation.trim(),
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey.shade700,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  }),
                   const SizedBox(height: 16),
-                  Text(
-                    body,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.grey.shade800,
-                      fontSize: 14,
-                      height: 1.5,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 18),
-                Container(
-                  width: double.infinity,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.75),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Text(
-                    actionLabel ?? hint,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
+                  Semantics(
+                    button: true,
+                    label: isLast ? 'Finish quiz. Score: $_score of $questionsCount' : 'Next question',
+                    hint: isLast
+                        ? 'Double tap to finish quiz and return to lesson'
+                        : 'Double tap for next question',
+                    onTap: _onDoubleTap,
+                    excludeSemantics: true,
+                    child: Material(
                       color: accent,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
+                      borderRadius: BorderRadius.circular(18),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(18),
+                        onTap: _onDoubleTap,
+                        child: Container(
+                          constraints: const BoxConstraints(minHeight: 56),
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                          alignment: Alignment.center,
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                isLast ? Icons.check_circle_rounded : Icons.arrow_forward_rounded,
+                                color: Colors.white,
+                                size: 24,
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                isLast ? 'Finish Quiz' : 'Next Question',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  hint,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.grey.shade600,
-                    fontSize: 12,
-                  ),
+                ] else ...[
+                  // All 4 options listed as large, distinct 56dp double-tappable buttons
+                  for (var i = 0; i < options.length; i++) ...[
+                    Builder(builder: (context) {
+                      final opt = options[i];
+                      final isSelected = i == _answerIndex;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: Semantics(
+                          button: true,
+                          label: 'Option ${opt.label}: ${opt.text}',
+                          hint: 'Double tap to choose Option ${opt.label}',
+                          onTap: () => unawaited(_selectQuizOption(i)),
+                          excludeSemantics: true,
+                          child: Material(
+                            color: isSelected
+                                ? const Color(0xFF1A56DB).withValues(alpha: 0.18)
+                                : Colors.white.withValues(alpha: 0.85),
+                            borderRadius: BorderRadius.circular(16),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(16),
+                              onTap: () => unawaited(_selectQuizOption(i)),
+                              child: Container(
+                                constraints: const BoxConstraints(minHeight: 56),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: isSelected ? const Color(0xFF1A56DB) : Colors.grey.shade300,
+                                    width: isSelected ? 2.5 : 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 32,
+                                      height: 32,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: isSelected ? const Color(0xFF1A56DB) : Colors.grey.shade200,
+                                      ),
+                                      alignment: Alignment.center,
+                                      child: Text(
+                                        opt.label,
+                                        style: TextStyle(
+                                          color: isSelected ? Colors.white : const Color(0xFF1A56DB),
+                                          fontWeight: FontWeight.w900,
+                                          fontSize: 15,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        opt.text,
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                                          color: Colors.grey.shade900,
+                                          height: 1.25,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _stageCard({
+    required IconData icon,
+    required Color accent,
+    required String title,
+    required String subtitle,
+    required String hint,
+    String? progress,
+    String? actionLabel,
+    String? body,
+    VoidCallback? onTap,
+  }) {
+    final semanticLabel = [
+      if (progress != null) progress,
+      title,
+      subtitle,
+      if (body != null) body,
+    ].join('. ');
+
+    return Semantics(
+      container: true,
+      button: true,
+      label: semanticLabel,
+      hint: actionLabel ?? hint,
+      onTap: onTap,
+      excludeSemantics: true,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(28),
+          onTap: onTap,
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  accent.withValues(alpha: 0.18),
+                  accent.withValues(alpha: 0.05)
+                ],
+              ),
+              borderRadius: BorderRadius.circular(28),
+              boxShadow: [
+                BoxShadow(
+                  color: accent.withValues(alpha: 0.15),
+                  blurRadius: 24,
+                  offset: const Offset(0, 14),
                 ),
               ],
+            ),
+            padding: const EdgeInsets.all(20),
+            // Scrollable, but still vertically centred when there is room.
+            //
+            // Two things legitimately shrink this card's space: the screen-reader
+            // control panel below it, and a large system font scale — which the
+            // low-vision students this app serves very often have turned on. Either
+            // one previously produced a RenderFlex overflow and clipped content off
+            // the bottom, invisibly. A fixed Column cannot express "centre if you
+            // fit, scroll if you don't"; this can.
+            child: LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    // min + the minHeight above: the Column hugs its content, and
+                    // the constraint stretches it to fill only when there is spare
+                    // room, so centring still works without forcing an overflow.
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: accent.withValues(alpha: 0.16),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(icon, color: accent, size: 40),
+                      ),
+                      const SizedBox(height: 16),
+                      if (progress != null) ...[
+                        Text(
+                          progress,
+                          style: TextStyle(
+                            color: accent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.1,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      Text(
+                        title,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: accent,
+                          fontSize: 28,
+                          fontWeight: FontWeight.w900,
+                          height: 1.1,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        subtitle,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.grey.shade700,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
+                        ),
+                      ),
+                      if (body != null) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          body,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.grey.shade800,
+                            fontSize: 14,
+                            height: 1.5,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 18),
+                      Container(
+                        width: double.infinity,
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.75),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Text(
+                          actionLabel ?? hint,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: accent,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        hint,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.grey.shade600,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
         ),
@@ -2113,6 +2503,7 @@ class _StudentLearningHubScreenState
       actionLabel: 'Double tap to open',
       hint:
           'Swipe right for next. Swipe left for previous. Double tap to open.',
+      onTap: _onDoubleTap,
     );
   }
 
@@ -2140,6 +2531,7 @@ class _StudentLearningHubScreenState
       actionLabel: 'Double tap to open lesson',
       hint:
           'Swipe right for next. Swipe left for previous. Double tap to open.',
+      onTap: _onDoubleTap,
     );
   }
 
@@ -2171,7 +2563,7 @@ class _StudentLearningHubScreenState
                   : Icons.play_circle_rounded,
               accent: const Color(0xFF7C3AED),
               title: topic.name,
-              subtitle: 'Ready to play',
+              subtitle: _lessonPlaying ? 'Playing' : 'Ready to play',
               body: lesson.rawText.length > 220
                   ? '${lesson.rawText.substring(0, 220)}...'
                   : lesson.rawText,
@@ -2179,6 +2571,7 @@ class _StudentLearningHubScreenState
                   _lessonPlaying ? 'Double tap to pause' : 'Double tap to play',
               hint:
                   'Swipe right for next topic. Swipe left for previous. Swipe up to replay. Swipe down for quiz.',
+              onTap: _onDoubleTap,
             );
           },
           loading: () => const Center(child: CircularProgressIndicator()),
@@ -2216,6 +2609,7 @@ class _StudentLearningHubScreenState
               subtitle: topic.name,
               actionLabel: 'Double tap to confirm',
               hint: 'Double tap to confirm. Swipe up to return.',
+              onTap: _onDoubleTap,
             );
           },
           loading: () => const Center(child: CircularProgressIndicator()),
@@ -2264,25 +2658,11 @@ class _StudentLearningHubScreenState
                     }
 
                     _answerIndex = _answerIndex.clamp(0, options.length - 1);
-                    final current = options[_answerIndex];
 
-                    return _stageCard(
-                      icon: Icons.quiz_rounded,
-                      accent: const Color(0xFF1A56DB),
-                      title:
-                          'Question ${_questionIndex + 1} of ${questions.length}',
-                      subtitle: question.questionText,
-                      body: _quizAnswered
-                          ? (_quizComplete
-                              ? 'Quiz complete. Score $_score of ${questions.length}.'
-                              : 'Swipe right for next question.')
-                          : 'Option ${current.label}. ${current.text}',
-                      actionLabel: _quizComplete
-                          ? 'Double tap to return to lesson'
-                          : 'Double tap to select answer',
-                      hint: _quizAnswered
-                          ? 'Swipe right for next question. Swipe left for previous question.'
-                          : 'Swipe right for next answer. Swipe left for previous answer. Double tap to select.',
+                    return _buildQuizCard(
+                      question: question,
+                      options: options,
+                      questionsCount: questions.length,
                     );
                   },
                   loading: () =>
@@ -2750,18 +3130,33 @@ class _StudentLearningHubScreenState
             _onSwipeUp);
         break;
       case LearningStage.quiz:
+        final quizQ = _currentQuizQuestion();
+        final quizOpts = quizQ != null ? _quizOptions(quizQ) : <_QuizOption>[];
         if (!_quizAnswered && !_quizComplete) {
-          add('Previous answer', 'Hear the previous option',
-              Icons.chevron_left_rounded, _onSwipeLeft);
-          add('Next answer', 'Hear the next option',
-              Icons.chevron_right_rounded, _onSwipeRight);
-          add('Choose this answer', 'Submits the option you are on',
-              Icons.check_circle_outline_rounded, _onDoubleTap);
+          for (var i = 0; i < quizOpts.length; i++) {
+            final opt = quizOpts[i];
+            final isCurrent = i == _answerIndex;
+            add(
+              'Option ${opt.label}: ${opt.text}',
+              'Double tap to choose Option ${opt.label}',
+              isCurrent
+                  ? Icons.radio_button_checked_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              () => unawaited(_selectQuizOption(i)),
+            );
+          }
         } else {
-          add('Continue', 'Goes to the next question',
-              Icons.arrow_forward_rounded, _onDoubleTap);
+          final isLast = _questionIndex >= _questionsCount() - 1;
+          add(
+            isLast ? 'Finish quiz' : 'Next question',
+            isLast
+                ? 'Double tap to finish quiz and return to lesson'
+                : 'Double tap to go to the next question',
+            isLast ? Icons.check_circle_rounded : Icons.arrow_forward_rounded,
+            _onDoubleTap,
+          );
         }
-        add('Repeat question', 'Reads the question and option again',
+        add('Repeat question', 'Reads the question and options again',
             Icons.replay_rounded, () => _announceCurrentState(force: true));
         break;
     }
@@ -2795,20 +3190,27 @@ class _StudentLearningHubScreenState
   /// Header entry point into the "My Progress" screen. Mirrors the spoken
   /// "my progress" voice command so the feature is reachable by touch too.
   Widget _buildProgressButton() {
-    return Tooltip(
-      message: 'My progress',
-      child: Material(
-        color: const Color(0xFF16A34A).withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
+    return Semantics(
+      button: true,
+      label: 'My progress',
+      hint: 'Double tap to open learning progress',
+      onTap: _openProgress,
+      excludeSemantics: true,
+      child: Tooltip(
+        message: 'My progress',
+        child: Material(
+          color: const Color(0xFF16A34A).withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(14),
-          onTap: _openProgress,
-          child: const Padding(
-            padding: EdgeInsets.all(10),
-            child: Icon(
-              Icons.insights_rounded,
-              color: Color(0xFF16A34A),
-              size: 22,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: _openProgress,
+            child: const Padding(
+              padding: EdgeInsets.all(10),
+              child: Icon(
+                Icons.insights_rounded,
+                color: Color(0xFF16A34A),
+                size: 22,
+              ),
             ),
           ),
         ),
@@ -2820,20 +3222,27 @@ class _StudentLearningHubScreenState
   /// visible — joining (or leaving/rejoining) a class is how cloud lessons
   /// start flowing into this device, so it must never be a buried setting.
   Widget _buildJoinClassButton() {
-    return Tooltip(
-      message: 'Join your class with a class code',
-      child: Material(
-        color: const Color(0xFF1A56DB).withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
+    return Semantics(
+      button: true,
+      label: 'Join class',
+      hint: 'Double tap to join your class with a class code',
+      onTap: _openJoinClassFlow,
+      excludeSemantics: true,
+      child: Tooltip(
+        message: 'Join your class with a class code',
+        child: Material(
+          color: const Color(0xFF1A56DB).withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(14),
-          onTap: _openJoinClassFlow,
-          child: const Padding(
-            padding: EdgeInsets.all(10),
-            child: Icon(
-              Icons.group_add_rounded,
-              color: Color(0xFF1A56DB),
-              size: 22,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: _openJoinClassFlow,
+            child: const Padding(
+              padding: EdgeInsets.all(10),
+              child: Icon(
+                Icons.group_add_rounded,
+                color: Color(0xFF1A56DB),
+                size: 22,
+              ),
             ),
           ),
         ),
@@ -2845,7 +3254,9 @@ class _StudentLearningHubScreenState
     return Semantics(
       button: true,
       label: 'Sign out',
-      hint: 'Return to student login and choose a different student',
+      hint: 'Double tap to return to student login and choose a different student',
+      onTap: () => unawaited(_signOutAndLeave()),
+      excludeSemantics: true,
       child: Tooltip(
         message: 'Sign out',
         child: Material(
@@ -2877,7 +3288,8 @@ class _StudentLearningHubScreenState
       LearningStage.quiz => 'Question',
     };
 
-    return Container(
+    return ExcludeSemantics(
+      child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: const Color(0xFF1A56DB).withValues(alpha: 0.1),
@@ -2891,6 +3303,7 @@ class _StudentLearningHubScreenState
           color: Color(0xFF1A56DB),
         ),
       ),
+    ),
     );
   }
 
@@ -3025,7 +3438,11 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
   Future<void> _say(String text) async {
     if (!mounted) return;
     setState(() => _statusText = text);
-    await ref.read(ttsServiceProvider).speakAndWait(text);
+    if (AccessibilityMode.isScreenReaderActive) {
+      AccessibilityMode.announce(text);
+    } else {
+      await ref.read(ttsServiceProvider).speakAndWait(text);
+    }
   }
 
   Future<void> _bootstrap() async {
@@ -3094,7 +3511,12 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
     final stt = ref.read(sttServiceProvider);
 
     setState(() => _stage = listeningStage);
-    await tts.speakAndWait(prompt);
+    if (AccessibilityMode.isScreenReaderActive) {
+      AccessibilityMode.announce(prompt);
+      await Future<void>.delayed(const Duration(milliseconds: 1400));
+    } else {
+      await tts.speakAndWait(prompt);
+    }
     if (!mounted || session != _session) return;
     // Settle gap: let the prompt's audio tail drain before the mic opens, so
     // the recogniser doesn't transcribe our own example ("S C, 4 2 7 1") as
@@ -3221,6 +3643,7 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
   /// helper or the teacher types only the four-character suffix; the app
   /// supplies `SC-`.
   Future<void> _useTypedCode() async {
+    FocusScope.of(context).unfocus();
     final typed = _codeController.text.trim();
     if (typed.isEmpty) return;
     _session++; // cancel any in-flight voice capture callbacks
@@ -3607,6 +4030,11 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
                     TextField(
                       controller: _codeController,
                       textCapitalization: TextCapitalization.characters,
+                      textInputAction: TextInputAction.done,
+                      onEditingComplete: () {
+                        FocusScope.of(context).unfocus();
+                        _useTypedCode();
+                      },
                       inputFormatters: [
                         FilteringTextInputFormatter.allow(
                             RegExp(r'[a-zA-Z0-9]')),
@@ -3619,19 +4047,45 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
                         border: OutlineInputBorder(),
                         isDense: true,
                       ),
-                      onSubmitted: (_) => _useTypedCode(),
+                      onSubmitted: (_) {
+                        FocusScope.of(context).unfocus();
+                        _useTypedCode();
+                      },
                     ),
                     const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: ElevatedButton(
-                        onPressed: _useTypedCode,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1A56DB),
-                          foregroundColor: Colors.white,
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Semantics(
+                            button: true,
+                            label: 'Close keyboard',
+                            hint: 'Double tap to close keyboard',
+                            onTap: () => FocusScope.of(context).unfocus(),
+                            child: OutlinedButton.icon(
+                              icon: const Icon(Icons.keyboard_hide_rounded, size: 18),
+                              label: const Text('Close keyboard'),
+                              onPressed: () => FocusScope.of(context).unfocus(),
+                            ),
+                          ),
                         ),
-                        child: const Text('Join with typed code'),
-                      ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Semantics(
+                            button: true,
+                            label: 'Join with typed code',
+                            hint: 'Double tap to submit class code',
+                            onTap: _useTypedCode,
+                            child: ElevatedButton(
+                              onPressed: _useTypedCode,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF1A56DB),
+                                foregroundColor: Colors.white,
+                              ),
+                              child: const Text('Join with code'),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                   if (_stage == _JoinStage.intro) ...[

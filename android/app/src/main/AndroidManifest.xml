@@ -2,11 +2,12 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
     <application
-        android:label="AudioLearner"
+        android:label="Audio Learner"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
+            android:label="Audio Learner"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""
