@@ -192,7 +192,7 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
       }
     }
 
-    stt.startListening(
+    await stt.startListening(
       // Single-keyword pick: matching on partials keeps the response instant,
       // while the final result acts as a safety net for slower recognisers.
       onPartial: match,
@@ -203,6 +203,24 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
         unawaited(_listenForRole());
       },
     );
+  }
+
+  void _openStudent() {
+    _navigated = true;
+    unawaited(ref.read(sttServiceProvider).stopListening());
+    if (AccessibilityMode.isScreenReaderActive) {
+      AccessibilityMode.announce('Student selected. Opening the learner screen.');
+    } else {
+      _speak('Student selected. Opening the learner screen.');
+    }
+    context.go('/student/pin');
+  }
+
+  void _openTeacher() {
+    // Stop the background voice-command loop
+    _navigated = true;
+    unawaited(ref.read(sttServiceProvider).stopListening());
+    context.push('/teacher/pin');
   }
 
   @override
@@ -225,6 +243,9 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
         backgroundColor: const Color(0xFFEBF2FF),
         body: GestureDetector(
           behavior: HitTestBehavior.opaque,
+          // Not a TalkBack target: it would be an invisible, unlabelled button
+          // covering the screen. The three controls below are the interface.
+          excludeFromSemantics: true,
           onTap: () {
             if (!_navigated) {
               unawaited(_listenForRole());
@@ -268,9 +289,15 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
               top: 16,
               left: 16,
               child: SafeArea(
+                // One clean TalkBack stop: "Say student or teacher, button,
+                // double tap to speak after the tone" — not the label merged
+                // with the button's own visible text.
                 child: Semantics(
-                  label: 'Voice command. Double-tap to say student or teacher.',
+                  label: 'Say student or teacher',
                   button: true,
+                  onTapHint: 'speak your choice after the tone',
+                  onTap: () => unawaited(_listenForRole()),
+                  excludeSemantics: true,
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFF1A56DB),
@@ -308,8 +335,11 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
               right: 16,
               child: SafeArea(
                 child: Semantics(
-                  label: 'Teacher mode. Double-tap to continue as a teacher.',
+                  label: 'Teacher',
                   button: true,
+                  onTapHint: 'continue as a teacher',
+                  onTap: _openTeacher,
+                  excludeSemantics: true,
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFF1A56DB),
@@ -333,12 +363,7 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    onPressed: () {
-                      // Stop the background voice-command loop
-                      _navigated = true;
-                      unawaited(ref.read(sttServiceProvider).stopListening());
-                      context.push('/teacher/pin');
-                    },
+                    onPressed: _openTeacher,
                   ),
                 ),
               ),
@@ -352,32 +377,14 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
               height: 200,
               child: Semantics(
                 button: true,
-                label: 'Student mode. Double-tap to enter as student.',
-                onTap: () {
-                  _navigated = true;
-                  unawaited(ref.read(sttServiceProvider).stopListening());
-                  if (AccessibilityMode.isScreenReaderActive) {
-                    AccessibilityMode.announce(
-                        'Student selected. Opening the learner screen.');
-                  } else {
-                    _speak('Student selected. Opening the learner screen.');
-                  }
-                  context.go('/student/pin');
-                },
+                label: 'Student',
+                onTapHint: 'start learning',
+                onTap: _openStudent,
+                excludeSemantics: true,
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: () {
-                      _navigated = true;
-                      unawaited(ref.read(sttServiceProvider).stopListening());
-                      if (AccessibilityMode.isScreenReaderActive) {
-                        AccessibilityMode.announce(
-                            'Student selected. Opening the learner screen.');
-                      } else {
-                        _speak('Student selected. Opening the learner screen.');
-                      }
-                      context.go('/student/pin');
-                    },
+                    onTap: _openStudent,
                 child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(

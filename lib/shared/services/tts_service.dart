@@ -37,6 +37,21 @@ class TtsService {
   /// Completer used by [speakAndWait] to know when an utterance finishes.
   Completer<void>? _completionCompleter;
 
+  /// Number of native `speak` calls that have not resolved yet.
+  ///
+  /// This, not [_speaking], is the truth about whether the engine is busy.
+  /// [_speaking] only flips when the engine's start callback arrives, which
+  /// can be a noticeable delay — longer still when TalkBack is using the same
+  /// engine. During that gap the old code skipped the native stop, so the
+  /// plugin still thought it was speaking and answered the NEXT speak call
+  /// instantly without saying anything. Callers took that instant answer as
+  /// "finished speaking" and opened the microphone while the previous prompt
+  /// was still playing.
+  int _inFlight = 0;
+
+  /// Completes when [_inFlight] drops back to zero. See [whenIdle].
+  Completer<void>? _idle;
+
   /// Character offset, within the text passed to the current [speak] call, of
   /// the word currently being spoken. Updated by the engine's progress
   /// callback; read right after a [stop] to learn where playback was paused.
@@ -100,6 +115,18 @@ class TtsService {
 
   /// Whether the engine is currently producing audio.
   bool get isSpeaking => _speaking;
+
+  /// Whether an utterance is queued or playing. Use this, not [isSpeaking],
+  /// to decide whether it is safe to open the microphone.
+  bool get isBusy => _inFlight > 0;
+
+  /// Completes once no utterance is queued or playing — the engine's own
+  /// completion signal, not an estimate. The microphone waits on this so it
+  /// can never open over our own speech, whichever flow started it.
+  Future<void> whenIdle() {
+    if (_inFlight == 0) return Future<void>.value();
+    return (_idle ??= Completer<void>()).future;
+  }
 
   /// Whether Google Speech Services (Google TTS engine) is installed.
   bool get isGoogleTtsInstalled => _googleTtsInstalled;
@@ -216,6 +243,7 @@ class TtsService {
       if (_completionCompleter != null && !_completionCompleter!.isCompleted) {
         _completionCompleter!.complete();
       }
+      _releasePendingSpeak();
     });
 
     _tts.setErrorHandler((message) {
@@ -229,9 +257,18 @@ class TtsService {
       if (_completionCompleter != null && !_completionCompleter!.isCompleted) {
         _completionCompleter!.complete();
       }
+      _releasePendingSpeak();
     });
 
     _initialized = true;
+  }
+
+  /// The Android plugin never answers a pending `speak` call when the engine
+  /// reports an error, or when something other than our own [stop] cancels the
+  /// utterance. Left alone, that call would keep [isBusy] true forever and the
+  /// microphone would never open again. A native stop answers it (with 0).
+  void _releasePendingSpeak() {
+    if (_inFlight > 0) unawaited(_tts.stop());
   }
 
   /// Starts the temporary audio-latency measurement for one accepted command.
@@ -282,15 +319,37 @@ class TtsService {
 
   /// Cancels any in-flight utterance and releases whoever is awaiting it, so a
   /// new utterance can start from a clean, idle engine. Only calls the native
-  /// `stop()` when something is actually speaking — calling it on an idle
+  /// `stop()` when an utterance is queued or playing — calling it on an idle
   /// engine between back-to-back lesson segments added clicks/latency.
   Future<void> _stopAndSettle() async {
     _cancelled = true;
     final pending = _completionCompleter;
     if (pending != null && !pending.isCompleted) pending.complete();
-    if (_speaking) {
+    if (_speaking || _inFlight > 0) {
       await _tts.stop();
       _speaking = false;
+    }
+  }
+
+  /// Calls the native speak and reports whether the utterance played to the
+  /// end. With awaitSpeakCompletion the plugin answers 1 when the engine says
+  /// it finished and 0 when it was stopped or refused, so the result — not the
+  /// mere fact that the call returned — is what "finished" means.
+  Future<bool> _speakNative(String text) async {
+    _inFlight++;
+    try {
+      final result = await _tts.speak(text);
+      // Platforms that do not report a result count as finished.
+      return result != 0;
+    } catch (_) {
+      return false;
+    } finally {
+      _inFlight--;
+      if (_inFlight == 0) {
+        final idle = _idle;
+        _idle = null;
+        if (idle != null && !idle.isCompleted) idle.complete();
+      }
     }
   }
 
@@ -307,7 +366,7 @@ class TtsService {
     await _stopAndSettle();
     if (myGeneration != _generation) return; // a newer request took over
     _cancelled = false;
-    await _tts.speak(text);
+    await _speakNative(text);
   }
 
   /// Stops any current speech immediately.
@@ -388,23 +447,20 @@ class TtsService {
       // rather than interleaving another utterance on top.
       if (_cancelled || myGeneration != _generation) return false;
       _completionCompleter = Completer<void>();
-      try {
-        // With awaitSpeakCompletion(true), `speak` resolves only when the
-        // chunk has finished speaking — that is the real "segment done"
-        // signal. Race it against the completer so a stop()/supersede (which
-        // completes the completer) also unblocks us promptly, and so we can
-        // never hang if a device fails to resolve the speak future.
-        await Future.any<void>([
-          _tts.speak(chunk).then((_) {}),
-          _completionCompleter!.future,
-        ]);
-      } catch (_) {
-        // Any engine-level failure (or a legacy completeError) ends this
-        // utterance without bringing down the caller — treat it as an
-        // interruption, exactly like a stop().
-        return false;
-      }
+      // With awaitSpeakCompletion(true), `speak` resolves only when the chunk
+      // has finished speaking — that is the real "segment done" signal, and
+      // its result says whether it played to the end. Race it against the
+      // completer so a stop()/supersede, an engine cancel or an engine error
+      // (all of which complete the completer) unblocks us promptly, and so we
+      // can never hang if a device fails to resolve the speak future.
+      final finished = await Future.any<bool>([
+        _speakNative(chunk),
+        _completionCompleter!.future.then((_) => false),
+      ]);
       if (_cancelled || myGeneration != _generation) return false;
+      // Cancelled or failed by the engine itself: report it as unfinished so
+      // the caller never treats a prompt that did not play as heard.
+      if (!finished) return false;
     }
     return true;
   }

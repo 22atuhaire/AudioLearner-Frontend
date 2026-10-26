@@ -19,15 +19,43 @@ import 'package:flutter/semantics.dart';
 ///
 /// So the app runs in one of two modes, decided by the platform:
 ///
-/// * **Screen-reader mode** — TalkBack (or VoiceOver) is driving. We stay
-///   quiet for interface chrome and let TalkBack read properly labelled
-///   controls, we stop the always-on microphone loop, and every action is
-///   reachable as a real focusable button. We still speak *lesson and quiz
-///   content*, because reading a whole lesson aloud with pacing, speed control
-///   and resume is the product — TalkBack would only read what is focused.
+/// * **Screen-reader mode** — TalkBack (or VoiceOver) is driving. Same lessons,
+///   same quiz, same actions; only the presentation changes. Every action is a
+///   real, labelled control TalkBack can reach. Interface feedback goes through
+///   TalkBack (focus and announcements), never our TTS. The microphone opens
+///   only when the student asks for it (push-to-talk), never on a timer.
+///   Lesson reading still uses our TTS, because reading a whole lesson with
+///   pacing, speed control and resume is the product — TalkBack would only
+///   read what is focused.
 ///
 /// * **Voice-first mode** — no screen reader. The original spoken loop and
 ///   gesture set take over, unchanged.
+///
+/// "Screen reader" here means Android's touch exploration is on
+/// (`accessibleNavigation`). That is exactly the condition that matters: it is
+/// what makes TalkBack own touch input and speech, so it is what makes our
+/// gestures unreachable and our speech a second voice.
+///
+/// ## Audio policy
+///
+/// Four things can make sound. Who goes when:
+///
+/// 1. **TalkBack** speaks whatever the student touches or focuses. The app
+///    never competes with it for interface feedback: under a screen reader the
+///    app's own spoken prompts are replaced by focus moves and announcements.
+/// 2. **Lesson audio** (our TTS) plays only after an explicit play, and keeps
+///    playing until an explicit pause or navigation. If TalkBack speaks while
+///    a lesson plays, Android ducks the lesson; the app never stops a lesson
+///    because TalkBack spoke, and never shows "paused" for that reason.
+///    Feedback about the lesson itself (a new speed) is spoken in the lesson's
+///    own voice, in sequence, rather than announced over it.
+/// 3. **App prompts** (our TTS) exist in voice-first mode only.
+/// 4. **The microphone** opens only when our TTS is idle by the engine's own
+///    completion signal (`TtsService.whenIdle`), never during lesson playback,
+///    and under a screen reader only on the student's explicit request.
+///    There is no API for knowing when TalkBack has finished speaking, so the
+///    app never guesses: anything automatic would let the microphone transcribe
+///    TalkBack reading the screen and act on it.
 ///
 /// Nothing here asks the student to change their phone settings. The app
 /// adapts to them, which is the whole point.
@@ -42,19 +70,26 @@ class AccessibilityMode {
   /// focused widgets itself — doubling it up produces overlapping speech.
   bool get shouldSpeakChrome => !screenReaderEnabled;
 
-  /// The app should keep the microphone open listening for commands.
+  /// The app should open the microphone by itself after it speaks.
   ///
-  /// By default under a screen reader, continuous unprompted background listening
-  /// is suspended to prevent TalkBack exploration chatter from triggering
-  /// unintended navigation commands. Students can use the explicit Voice Command
-  /// button or enable Voice Auto-Listen.
+  /// Never under a screen reader (see the audio policy above). Students use
+  /// the Voice command button instead.
   bool get shouldAutoListen => !screenReaderEnabled;
 
   /// Show the on-screen control panel of real, labelled buttons.
   ///
-  /// Always available to sighted helpers, but essential under a screen reader,
-  /// where the custom gestures cannot be relied on.
+  /// Essential under a screen reader, where the custom gestures cannot be
+  /// relied on.
   bool get needsExplicitControls => screenReaderEnabled;
+
+  /// The custom whole-screen gestures (swipes, double tap, long press,
+  /// two-finger tap) should be active.
+  ///
+  /// Off under a screen reader: TalkBack passes some of its own gestures
+  /// through to the app (a two-finger scroll arrives as a one-finger drag), so
+  /// leaving them on let TalkBack navigation trigger app actions the student
+  /// never asked for.
+  bool get customGesturesEnabled => !screenReaderEnabled;
 
   /// Lesson and quiz *content* is spoken in both modes — it is the product.
   bool get shouldSpeakContent => true;
@@ -73,10 +108,16 @@ class AccessibilityMode {
 
   /// Speaks [message] through the screen reader without moving focus.
   ///
-  /// Used for events that have no widget to focus — "Correct", "Question 3 of
-  /// 5", "4 new lessons ready". Without this a TalkBack user gets silence at
-  /// exactly the moments that matter, because nothing they touched changed.
-  static void announce(String message, {bool assertive = true}) {
+  /// Used for events that have no widget to focus — "Paused", "2 new lessons
+  /// ready", a voice error. Prefer moving focus with [AccessibilityFocusTarget]
+  /// when the event replaced what the student was touching: the screen reader
+  /// then reads the new content itself, once, and the student can carry on
+  /// swiping from there.
+  ///
+  /// [assertive] interrupts whatever TalkBack is saying. Use it for things the
+  /// student must hear now (errors); keep routine confirmations polite so they
+  /// queue behind TalkBack instead of cutting it off mid-word.
+  static void announce(String message, {bool assertive = false}) {
     if (message.trim().isEmpty) return;
     // `SemanticsService.announce` is deprecated in favour of
     // `sendAnnouncement`, which takes a view so it can support multiple
@@ -97,6 +138,87 @@ class AccessibilityMode {
   }
 }
 
+/// Moves the screen reader's focus to [child] when asked to.
+///
+/// ## The problem it solves
+///
+/// When the control a TalkBack user just activated disappears — "Next
+/// question" is replaced by the next question's answers, an answer is replaced
+/// by its feedback, a subject card is replaced by the topic list — TalkBack's
+/// focus has nowhere to go. It falls back to the top of the window and starts
+/// reading the status bar, and the student has to swipe all the way back.
+///
+/// Wrapping the content that should be read next in this widget, and giving it
+/// a fresh [request] at that moment, sends focus there once the new frame is
+/// built. TalkBack then reads that content — once, as the focused item — and
+/// the student's next swipe continues from it. This is Flutter's documented
+/// use of [FocusSemanticEvent] ("the currently focused rendering object is
+/// replaced by another"), the same mechanism the Navigator uses to restore
+/// focus after a route is popped.
+///
+/// ## Usage
+///
+/// [child] must be a `Semantics(container: true, ...)` node, so the event lands
+/// on exactly the node TalkBack should read.
+///
+/// Each value from [newRequest] moves focus at most once, to the first target
+/// built with it. A target rebuilt later with the same value (a provider
+/// refresh, say) does not steal focus back from wherever the student moved.
+/// Targets that should not take focus get a null [request].
+class AccessibilityFocusTarget extends StatefulWidget {
+  const AccessibilityFocusTarget({
+    super.key,
+    required this.request,
+    required this.child,
+  });
+
+  /// A value from [newRequest], or null to leave focus alone.
+  final int? request;
+  final Widget child;
+
+  static int _issued = 0;
+  static int _consumed = 0;
+
+  /// Returns a new request token. Pass it to the target that should receive
+  /// focus after the next frame.
+  static int newRequest() => ++_issued;
+
+  @override
+  State<AccessibilityFocusTarget> createState() =>
+      _AccessibilityFocusTargetState();
+}
+
+class _AccessibilityFocusTargetState extends State<AccessibilityFocusTarget> {
+  @override
+  void initState() {
+    super.initState();
+    _maybeFocus();
+  }
+
+  @override
+  void didUpdateWidget(AccessibilityFocusTarget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.request != oldWidget.request) _maybeFocus();
+  }
+
+  void _maybeFocus() {
+    final request = widget.request;
+    if (request == null || request <= AccessibilityFocusTarget._consumed) {
+      return;
+    }
+    AccessibilityFocusTarget._consumed = request;
+    // The semantics tree for this frame is sent to the platform before
+    // post-frame callbacks run, so the node exists by the time focus is sent.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !AccessibilityMode.isScreenReaderActive) return;
+      context.findRenderObject()?.sendSemanticsEvent(const FocusSemanticEvent());
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
 /// A large, clearly labelled action button for the accessible control panel.
 ///
 /// Minimum 56dp of height and a real [Semantics] button role, so TalkBack
@@ -115,7 +237,10 @@ class AccessibleActionButton extends StatelessWidget {
 
   final String label;
 
-  /// Spoken after the label to explain the outcome ("plays the next topic").
+  /// What activating the button does, as a verb phrase ("move to the next
+  /// subject"). TalkBack speaks it as "double-tap to <hint>" in place of its
+  /// generic "double-tap to activate", so it adds meaning without adding a
+  /// second "double tap" sentence.
   final String hint;
   final IconData icon;
   final VoidCallback onPressed;
@@ -127,7 +252,7 @@ class AccessibleActionButton extends StatelessWidget {
     return Semantics(
       button: true,
       label: label,
-      hint: hint,
+      onTapHint: hint,
       onTap: onPressed,
       child: ExcludeSemantics(
         child: Material(

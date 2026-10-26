@@ -10,6 +10,7 @@ import 'package:audioapp/shared/services/question_answer_service.dart';
 import 'package:audioapp/shared/services/providers.dart';
 import 'package:audioapp/shared/services/stt_service.dart';
 import 'package:audioapp/shared/services/tts_service.dart';
+import 'package:audioapp/shared/services/voice_command_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -17,6 +18,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 enum LearningStage { subjects, topics, lesson, quizConfirm, quiz }
+
+/// Where TalkBack's focus should land after a change replaces what the
+/// student was touching. See [AccessibilityFocusTarget].
+enum _FocusTarget {
+  /// The stage card (subject, topic, lesson, quiz confirmation, empty state).
+  card,
+
+  /// The current quiz question.
+  question,
+
+  /// The result of the answer just chosen.
+  feedback,
+}
 
 class StudentLearningHubScreen extends ConsumerStatefulWidget {
   const StudentLearningHubScreen({super.key});
@@ -27,14 +41,31 @@ class StudentLearningHubScreen extends ConsumerStatefulWidget {
 }
 
 class _StudentLearningHubScreenState
-    extends ConsumerState<StudentLearningHubScreen> {
+    extends ConsumerState<StudentLearningHubScreen>
+    with WidgetsBindingObserver {
   LearningStage _stage = LearningStage.subjects;
   int _subjectIndex = 0;
   int _topicIndex = 0;
   int _questionIndex = 0;
+
+  // The answer the swipe/voice cursor is on — NOT an answer the student has
+  // chosen. Swiping moves it and double tap submits it (voice-first mode).
+  // Once [_quizAnswered] is true it is the answer that was submitted. Under a
+  // screen reader TalkBack's own focus is the cursor, so this is never drawn
+  // as a selection there: showing option 1 highlighted at the start of every
+  // question looked exactly like an answer chosen without the student.
   int _answerIndex = 0;
   int _score = 0;
+
+  // True from an explicit play until an explicit pause, navigation, or the
+  // playback loop ending for any reason — the loop itself clears it on exit
+  // (see _playLessonFrom), so the card can never say "Playing" over silence.
   bool _lessonPlaying = false;
+
+  // Identifies the playback run that owns [_lessonPlaying]. Bumped by anything
+  // that deliberately takes playback over (play, resume at a new speed), so a
+  // superseded run exiting late does not clear the flag for its successor.
+  int _playbackToken = 0;
   // Lesson playback is spoken segment-by-segment so a pause can resume from
   // the same place instead of restarting. These track the split text, the
   // next segment to speak, and which lesson the segments belong to.
@@ -46,6 +77,10 @@ class _StudentLearningHubScreenState
   // was paused, so resume continues from the exact word the student stopped on
   // rather than replaying the whole segment. 0 means "from the segment start".
   int _pausedCharOffset = 0;
+
+  // The loaded lesson has been started and not yet heard to the end, so the
+  // next play continues it: the card says "Paused", not "Ready to play".
+  bool _lessonStarted = false;
   bool _quizAnswered = false;
   bool _quizComplete = false;
   String? _announcementKey;
@@ -71,13 +106,35 @@ class _StudentLearningHubScreenState
   // consecutive empty windows. A single tap anywhere on the screen wakes it
   // back up (see _onTap / _wakeVoiceFromSleep). This prevents the phone from
   // sitting in dead silence with no indication the mic is off.
+  //
+  // Voice-first mode only. Under TalkBack a single tap never reaches the app
+  // (TalkBack uses it to explore), so the microphone never opens on its own
+  // there and never needs waking — the Voice command button is the way in.
   bool _voiceSleeping = false;
 
-  // ── Screen-reader voice interaction ─────────────────────────────────────
-  // Allows TalkBack users to either auto-listen for commands after announcements
-  // or use the explicit "Voice command" push-to-talk button.
-  bool _voiceAutoListen = false;
-  static const String _kVoiceAutoListenKey = 'voice_auto_listen_screen_reader';
+  // Set when listening failed for a reason that retrying will not fix — no
+  // internet, no microphone permission, no recognizer. The automatic loop
+  // stops (re-trying only replayed the recognizer chime) until the student
+  // taps to try again, and the reason was said out loud once.
+  VoiceFailure? _voiceUnavailable;
+
+  // Consecutive "recognizer busy" failures. Low-end phones need a moment to
+  // release the recognizer between sessions; restarting at once fails again.
+  int _busyRetries = 0;
+  static const int _maxBusyRetries = 2;
+  static const Duration _recognizerCooldown = Duration(milliseconds: 700);
+
+  // Pause between our speech finishing (by the TTS engine's completion
+  // callback) and the microphone opening. Not a guess at when speech ends —
+  // that is awaited exactly — but room for the speaker's last syllable to
+  // stop echoing off the walls, which the recognizer would otherwise hear.
+  static const Duration _micSettleGap = Duration(milliseconds: 450);
+
+  // ── TalkBack focus ──────────────────────────────────────────────────────
+  // Which element should receive TalkBack's focus after the next frame, and
+  // the request token that makes it happen exactly once.
+  _FocusTarget? _focusTarget;
+  int? _focusRequest;
 
   // ── Echo guard ──────────────────────────────────────────────────────────
   // On a hands-free phone the microphone hears the app's own spoken prompt
@@ -214,7 +271,8 @@ class _StudentLearningHubScreenState
     _stt = ref.read(sttServiceProvider);
     _tts = ref.read(ttsServiceProvider);
     _link = ref.read(backendLinkServiceProvider);
-    _loadVoiceAutoListen();
+    WidgetsBinding.instance.addObserver(this);
+    _screenReaderWasOn = _screenReaderOn;
     Future<void>(() async {
       await ref.read(ttsInitProvider.future);
       if (!mounted) return;
@@ -267,12 +325,17 @@ class _StudentLearningHubScreenState
               'screen to join a class. Or keep learning with the lessons '
               'already on this phone.';
           if (_screenReaderOn) {
-            AccessibilityMode.announce(hint);
+            AccessibilityMode.announce(
+              'To get lessons from your teacher, use Join class in the '
+              'controls. Or keep learning with the lessons already on this '
+              'phone.',
+            );
           } else {
             await ref.read(ttsServiceProvider).speakAndWait(hint);
             _noteSpoke(hint);
           }
-          if (mounted) _announceCurrentState(force: true);
+          // TalkBack already has its focus; don't pull it back to the card.
+          if (mounted) _announceCurrentState(force: true, refocus: false);
         }
         return;
       }
@@ -298,14 +361,7 @@ class _StudentLearningHubScreenState
           await ref.read(allSubjectsProvider.future);
         } catch (_) {}
         if (!mounted) return;
-        await _speak(
-          added == 1
-              ? 'One new lesson from your class is ready.'
-              : '$added new lessons from your class are ready.',
-        );
-        if (mounted && _stage == LearningStage.subjects) {
-          _announceCurrentState(force: true);
-        }
+        _announceNewLessons(added);
       } else if (mounted) {
         // A newly uploaded note may still be processing on the backend when
         // the student joins. Retry a few times so the student does not have to
@@ -327,14 +383,7 @@ class _StudentLearningHubScreenState
             ref.invalidate(allSubjectsProvider);
             await ref.read(allSubjectsProvider.future);
             if (!mounted) return;
-            await _speak(
-              retryAdded == 1
-                  ? 'One new lesson from your class is ready.'
-                  : '$retryAdded new lessons from your class are ready.',
-            );
-            if (mounted && _stage == LearningStage.subjects) {
-              _announceCurrentState(force: true);
-            }
+            _announceNewLessons(retryAdded);
             break;
           }
         }
@@ -368,7 +417,9 @@ class _StudentLearningHubScreenState
 
     if (!mounted) return;
     _voiceLoopSuspended = false;
-    _announceCurrentState(force: true);
+    // Under TalkBack the Navigator returns focus to the control that opened
+    // the dialog; moving it again here would fight that.
+    _announceCurrentState(force: true, refocus: false);
     unawaited(_bootstrapCloudBridge());
   }
 
@@ -386,11 +437,13 @@ class _StudentLearningHubScreenState
 
     if (!mounted) return;
     _voiceLoopSuspended = false;
-    _announceCurrentState(force: true);
+    // As above: the Navigator restores TalkBack's focus on return.
+    _announceCurrentState(force: true, refocus: false);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _voiceLoopSession++;
     _stt.stopListening();
     _tts.stop();
@@ -398,147 +451,139 @@ class _StudentLearningHubScreenState
     super.dispose();
   }
 
-  Future<void> _speak(String text) async {
+  // ── Platform changes: TalkBack toggled, app sent to the background ───────
+
+  bool _screenReaderWasOn = false;
+  bool _wasBackgrounded = false;
+
+  @override
+  void didChangeAccessibilityFeatures() {
+    final screenReader = _screenReaderOn;
+    if (!mounted || screenReader == _screenReaderWasOn) return;
+    _screenReaderWasOn = screenReader;
+    // TalkBack was switched on or off mid-session. build() swaps the controls;
+    // the audio has to follow. A listening window opened for voice-first mode
+    // would otherwise keep re-arming under TalkBack and transcribe TalkBack
+    // reading the screen. The lesson pauses (keeping its place) so the student
+    // restarts it in the new mode on purpose.
+    _voiceLoopSession++;
+    _stopLessonAudio();
+    unawaited(_stt.stopListening());
+    unawaited(_tts.stop());
+    setState(() {
+      _voiceSleeping = false;
+      _voiceUnavailable = null;
+    });
+    _silentWindows = 0;
+    _busyRetries = 0;
+    _announceCurrentState(force: true);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      // The app is no longer visible. Nothing outside the app can stop a
+      // lesson (there are no notification controls), and Android gives a
+      // background app a silent microphone, so the voice loop would only fail
+      // and complain. Pause the lesson where it is and close the microphone.
+      _wasBackgrounded = true;
+      _voiceLoopSession++;
+      _stopLessonAudio();
+      unawaited(_stt.stopListening());
+      unawaited(_tts.stop());
+    } else if (state == AppLifecycleState.resumed && _wasBackgrounded) {
+      _wasBackgrounded = false;
+      if (mounted) _announceCurrentState(force: true, refocus: false);
+    }
+  }
+
+  /// Stops lesson reading because the student moved on (navigation, leaving
+  /// the app). The playback loop records the word it was on, so the next play
+  /// resumes there. Without this, leaving the lesson under TalkBack — where no
+  /// app speech follows to cut it off — left the lesson talking on another
+  /// screen.
+  void _stopLessonAudio() {
+    if (!_lessonPlaying) return;
+    setState(() => _lessonPlaying = false);
+    unawaited(_tts.stop());
+  }
+
+  /// Tells the student new class lessons arrived — but never by interrupting
+  /// a lesson that is being read, which is worth more than the news. (Speaking
+  /// it used to cut the lesson off and leave the card saying "Playing".)
+  void _announceNewLessons(int count) {
+    if (_lessonPlaying) return;
+    final message = count == 1
+        ? 'One new lesson from your class is ready.'
+        : '$count new lessons from your class are ready.';
     if (_screenReaderOn) {
-      AccessibilityMode.announce(text);
+      AccessibilityMode.announce(message);
       return;
     }
-    final tts = ref.read(ttsServiceProvider);
-    await tts.speak(text);
-  }
-
-  // ── Screen-reader voice navigation helpers ──────────────────────────────
-
-  Future<void> _loadVoiceAutoListen() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      if (mounted) {
-        setState(() {
-          _voiceAutoListen = prefs.getBool(_kVoiceAutoListenKey) ?? false;
-        });
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _toggleVoiceAutoListen() async {
-    final next = !_voiceAutoListen;
-    setState(() => _voiceAutoListen = next);
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_kVoiceAutoListenKey, next);
-    } catch (_) {}
-    final msg = next
-        ? 'Voice auto-listen turned on. The microphone will listen for commands after announcements.'
-        : 'Voice auto-listen turned off. Double tap Voice command whenever you want to speak.';
-    if (_screenReaderOn) {
-      AccessibilityMode.announce(msg);
+    if (_stage == LearningStage.subjects) {
+      unawaited(_announceSequenceAndListen([message, _announcementText()]));
     } else {
-      unawaited(_announceAndListen(msg));
+      unawaited(_announceAndListen(message));
     }
   }
 
+  // ── Voice input ─────────────────────────────────────────────────────────
+
+  /// Vibration plus a click marks the moment the microphone opens. The cues
+  /// are not awaited: they are a courtesy, and a slow platform reply must
+  /// never hold up the microphone. The short pause keeps the click itself
+  /// from being the first thing recorded.
   Future<void> _cueListening() async {
-    try {
-      await HapticFeedback.mediumImpact();
-      await SystemSound.play(SystemSoundType.click);
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-    } catch (_) {}
+    unawaited(HapticFeedback.mediumImpact().catchError((_) {}));
+    unawaited(SystemSound.play(SystemSoundType.click).catchError((_) {}));
+    await Future<void>.delayed(const Duration(milliseconds: 150));
   }
 
-  /// Explicit push-to-talk voice command navigation.
-  /// Available across all learning stages for screen-reader and voice-first users alike.
+  /// Explicit push-to-talk: one listening window, opened because the student
+  /// asked for it. Under a screen reader this is the ONLY way the microphone
+  /// opens. Activating it while listening stops listening.
   Future<void> _enterVoiceCommandMode() async {
     if (!mounted) return;
-    final session = ++_voiceLoopSession;
-    await ref.read(sttServiceProvider).stopListening();
-    ref.read(ttsServiceProvider).stop();
-    if (_lessonPlaying) {
-      setState(() => _lessonPlaying = false);
-    }
-
-    const prompt = 'Say your command after the tone.';
-    if (_screenReaderOn) {
-      AccessibilityMode.announce(prompt);
-      await Future<void>.delayed(const Duration(milliseconds: 1400));
-    } else {
-      await ref.read(ttsServiceProvider).speakAndWait(prompt);
-      _noteSpoke(prompt);
-    }
-    if (!mounted || session != _voiceLoopSession) return;
-
-    await _cueListening();
-    if (!mounted || session != _voiceLoopSession) return;
-
     final stt = ref.read(sttServiceProvider);
-    final ready = await stt.initialize();
-    if (!ready || !mounted || session != _voiceLoopSession) {
-      if (_screenReaderOn) {
-        AccessibilityMode.announce('Speech recognition is not available.');
-      }
+    if (stt.isListening) {
+      _voiceLoopSession++;
+      await stt.stopListening();
+      if (_screenReaderOn) AccessibilityMode.announce('Stopped listening.');
       return;
     }
 
-    _listenStartedAt = DateTime.now();
-    var handled = false;
+    final session = ++_voiceLoopSession;
+    _silentWindows = 0;
+    _busyRetries = 0;
+    await stt.stopListening();
+    // The microphone must not hear the lesson.
+    _stopLessonAudio();
+    await ref.read(ttsServiceProvider).stop();
+    if (!mounted || session != _voiceLoopSession) return;
 
-    stt.startListening(
-      listenFor: const Duration(seconds: 15),
-      pauseFor: const Duration(seconds: 5),
-      onPartial: (words) {
-        if (handled || session != _voiceLoopSession || !mounted) return;
-        if (_isEcho(words)) return;
-        if (_tryDispatchVoiceCommand(words)) {
-          handled = true;
-          _silentWindows = 0;
-          unawaited(stt.stopListening());
-        }
-      },
-      onResult: (words) {
-        if (handled || session != _voiceLoopSession) return;
-        handled = true;
-        unawaited(stt.stopListening());
-        if (_isEcho(words) || !_tryDispatchVoiceCommand(words)) {
-          final msg = 'Command not recognised: "$words". Double tap Voice command to try again.';
-          if (_screenReaderOn) {
-            AccessibilityMode.announce(msg);
-          } else {
-            unawaited(_announceAndListen(msg));
-          }
-        } else {
-          _silentWindows = 0;
-        }
-      },
-      onDone: () {
-        if (handled || session != _voiceLoopSession) return;
-        handled = true;
-        const msg = 'Nothing heard. Double tap Voice command to try again.';
-        if (_screenReaderOn) {
-          AccessibilityMode.announce(msg);
-        } else {
-          unawaited(_announceAndListen(msg));
-        }
-      },
-    );
+    // Under TalkBack there is no spoken prompt: the student just activated a
+    // button labelled "Voice command", and anything announced now would be
+    // spoken by TalkBack while the microphone opens — and transcribed. The
+    // tone is the prompt.
+    if (!_screenReaderOn) {
+      const prompt = 'Say your command after the tone.';
+      await ref.read(ttsServiceProvider).speakAndWait(prompt);
+      _noteSpoke(prompt);
+      if (!mounted || session != _voiceLoopSession) return;
+      await _cueListening();
+    }
+    await _openVoiceWindow(session, pushToTalk: true);
   }
-
-  // ── Voice-first interaction loop ────────────────────────────────────────
 
   /// Speaks [text], then opens a short listening window for a spoken command.
   /// Use for one-off announcements (errors, boundary messages) that aren't
   /// covered by [_announceCurrentState].
   Future<void> _announceAndListen(String text) async {
     if (!mounted) return;
-    // Under a screen reader, announce through TalkBack.
-    // When auto-listen is enabled, open a listening window once TalkBack finishes.
+    // Under a screen reader TalkBack says it, and the microphone stays closed:
+    // there is no way to know when TalkBack has finished speaking.
     if (_screenReaderOn) {
       AccessibilityMode.announce(text);
-      if (_voiceAutoListen) {
-        final wordsCount = text.split(' ').where((w) => w.isNotEmpty).length;
-        final approxMs = (wordsCount * 320).clamp(1800, 5000);
-        await Future<void>.delayed(Duration(milliseconds: approxMs));
-        if (!mounted) return;
-        await _listenForVoiceCommand(_voiceLoopSession, allowUnderScreenReader: true);
-      }
       return;
     }
     final session = ++_voiceLoopSession;
@@ -550,24 +595,14 @@ class _StudentLearningHubScreenState
     await ref.read(ttsServiceProvider).speakAndWait(text);
     _noteSpoke(text);
     if (!mounted || session != _voiceLoopSession) return;
-    await _listenForVoiceCommand(session);
+    await _openVoiceWindow(session, pushToTalk: false);
   }
 
   /// Speaks each message in [texts] in order, then opens a listening window.
   Future<void> _announceSequenceAndListen(List<String> texts) async {
     if (!mounted) return;
-    // Quiz feedback ("Correct." / "The correct answer is…") reaches a TalkBack
-    // user through the semantics layer.
     if (_screenReaderOn) {
-      final combined = texts.join(' ');
-      AccessibilityMode.announce(combined);
-      if (_voiceAutoListen) {
-        final wordsCount = combined.split(' ').where((w) => w.isNotEmpty).length;
-        final approxMs = (wordsCount * 320).clamp(1800, 6000);
-        await Future<void>.delayed(Duration(milliseconds: approxMs));
-        if (!mounted) return;
-        await _listenForVoiceCommand(_voiceLoopSession, allowUnderScreenReader: true);
-      }
+      AccessibilityMode.announce(texts.join(' '));
       return;
     }
     final session = ++_voiceLoopSession;
@@ -581,7 +616,7 @@ class _StudentLearningHubScreenState
     }
     _noteSpoke(texts.join(' '));
     if (!mounted || session != _voiceLoopSession) return;
-    await _listenForVoiceCommand(session);
+    await _openVoiceWindow(session, pushToTalk: false);
   }
 
   /// True when TalkBack (or another reader) is driving the screen. Cached per
@@ -589,108 +624,235 @@ class _StudentLearningHubScreenState
   /// the announcement paths can consult it outside build().
   bool get _screenReaderOn => AccessibilityMode.isScreenReaderActive;
 
-  /// Opens ONE listening window after an announcement. If nothing usable is
-  /// heard (silence, or only our own prompt echoing back), it re-arms at most
-  /// [_maxSilentWindows] times then goes quiet — a gesture or the next
-  /// announcement revives it.
-  Future<void> _listenForVoiceCommand(int session, {bool allowUnderScreenReader = false}) async {
-    if (!mounted || _voiceLoopSuspended || session != _voiceLoopSession) return;
-    // Under a screen reader, listen if auto-listen is active or explicitly permitted.
-    if (_screenReaderOn && !allowUnderScreenReader && !_voiceAutoListen) return;
+  /// Opens ONE listening window, once our own speech has finished.
+  ///
+  /// [pushToTalk] means the student asked for this window (Voice command, or
+  /// a tap to wake the microphone). Its outcome is always reported — nothing
+  /// heard, not understood, or why voice is unavailable — because the student
+  /// is waiting on it. Automatic windows (voice-first mode, after an
+  /// announcement) stay quiet on silence and re-arm a bounded number of times.
+  Future<void> _openVoiceWindow(int session, {required bool pushToTalk}) async {
+    bool stale() =>
+        !mounted ||
+        session != _voiceLoopSession ||
+        (!pushToTalk && _voiceLoopSuspended);
+    if (stale()) return;
+    // Automatic listening never happens under a screen reader, never during a
+    // lesson, and not while voice is known to be unavailable.
+    if (!pushToTalk &&
+        (_screenReaderOn || _lessonPlaying || _voiceUnavailable != null)) {
+      return;
+    }
+
+    // Our own speech must be over — by the TTS engine's completion signal,
+    // whichever flow started it — before the microphone opens. The timeout
+    // only guards against a device that never reports completion.
+    await _tts
+        .whenIdle()
+        .timeout(const Duration(seconds: 20), onTimeout: () {});
+    if (stale()) return;
+    if (!_screenReaderOn) {
+      await Future<void>.delayed(_micSettleGap);
+      if (stale()) return;
+    }
 
     final stt = ref.read(sttServiceProvider);
     final ready = await stt.initialize();
-    if (!ready ||
-        !mounted ||
-        _voiceLoopSuspended ||
-        session != _voiceLoopSession) {
+    if (stale()) return;
+    if (!ready) {
+      _reportVoiceUnavailable(await stt.unavailableReason());
       return;
     }
-
-    // Settle gap: let the audio tail fully drain before the mic opens so
-    // the recogniser doesn't immediately transcribe our own announcement.
-    await Future<void>.delayed(const Duration(milliseconds: 450));
-    if (!mounted || _voiceLoopSuspended || session != _voiceLoopSession) {
-      return;
-    }
-
     if (_screenReaderOn) {
       await _cueListening();
-      if (!mounted || _voiceLoopSuspended || session != _voiceLoopSession) return;
+      if (stale()) return;
     }
 
+    // Under a screen reader only the finished phrase counts. Acting on
+    // partials lets a fragment of whatever is in the room — TalkBack reading
+    // the next control, say — fire a command before the student has spoken.
+    final actOnPartials = !_screenReaderOn;
     _listenStartedAt = DateTime.now();
     var handled = false;
-    stt.startListening(
+    var longestPartial = '';
+
+    void heard(String words) {
+      if (_isEcho(words) || !_tryDispatchVoiceCommand(words)) {
+        if (pushToTalk) {
+          _sayVoiceOutcome('I did not understand "$words".');
+        } else {
+          _retryListen(session);
+        }
+      } else {
+        _silentWindows = 0;
+        _busyRetries = 0;
+      }
+    }
+
+    final started = await stt.startListening(
+      listenFor: Duration(seconds: pushToTalk ? 12 : 30),
+      pauseFor: Duration(seconds: pushToTalk ? 5 : 8),
       onPartial: (words) {
-        if (handled || session != _voiceLoopSession || !mounted) return;
-        if (_isEcho(words)) return; // our own prompt bleeding into the mic
+        if (handled || stale()) return;
+        if (words.length > longestPartial.length) longestPartial = words;
+        if (!actOnPartials || _isEcho(words)) return;
         if (_tryDispatchVoiceCommand(words)) {
           handled = true;
           _silentWindows = 0;
+          _busyRetries = 0;
           unawaited(stt.stopListening());
         }
       },
       onResult: (words) {
-        if (handled || session != _voiceLoopSession) return;
+        if (handled || stale()) return;
         handled = true;
-        unawaited(stt.stopListening());
-        if (_isEcho(words) || !_tryDispatchVoiceCommand(words)) {
-          // Echo or unrecognised — try once more, within budget.
-          _retryListen(session);
-        } else {
-          _silentWindows = 0;
-        }
+        heard(words);
       },
       onDone: () {
-        if (handled || session != _voiceLoopSession) return;
+        if (handled || stale()) return;
         handled = true;
-        _retryListen(session);
+        // Many recognizers end without a final result; under a screen reader
+        // the partials were held back, so use the longest one now.
+        if (!actOnPartials && longestPartial.isNotEmpty) {
+          heard(longestPartial);
+        } else {
+          _onVoiceWindowFailed(session, VoiceFailure.noSpeech,
+              pushToTalk: pushToTalk);
+        }
+      },
+      onError: (message) {
+        if (handled || stale()) return;
+        handled = true;
+        if (!actOnPartials && longestPartial.isNotEmpty) {
+          heard(longestPartial);
+        } else {
+          _onVoiceWindowFailed(session, SttService.classifyError(message),
+              pushToTalk: pushToTalk);
+        }
       },
     );
+    // The microphone did not open and no callback will come. Say so rather
+    // than leaving the student waiting in silence.
+    if (!started && !handled && !stale()) {
+      handled = true;
+      _onVoiceWindowFailed(session, VoiceFailure.busy, pushToTalk: pushToTalk);
+    }
   }
 
-  /// Re-arms the single listening window a bounded number of times, then
+  /// Decides what follows a window that heard nothing usable.
+  void _onVoiceWindowFailed(int session, VoiceFailure failure,
+      {required bool pushToTalk}) {
+    if (!mounted || session != _voiceLoopSession) return;
+    switch (failure) {
+      case VoiceFailure.noSpeech:
+        if (pushToTalk) {
+          _sayVoiceOutcome('Nothing heard.');
+        } else {
+          _retryListen(session);
+        }
+      case VoiceFailure.busy:
+        if (_busyRetries < _maxBusyRetries) {
+          _busyRetries++;
+          unawaited(() async {
+            await Future<void>.delayed(_recognizerCooldown);
+            if (!mounted || session != _voiceLoopSession) return;
+            await _openVoiceWindow(session, pushToTalk: pushToTalk);
+          }());
+        } else {
+          _busyRetries = 0;
+          _reportVoiceUnavailable(VoiceFailure.busy);
+        }
+      case VoiceFailure.noInternet:
+      case VoiceFailure.permissionDenied:
+      case VoiceFailure.unavailable:
+        _reportVoiceUnavailable(failure);
+    }
+  }
+
+  /// Result of a push-to-talk window the student is waiting on.
+  void _sayVoiceOutcome(String message) {
+    if (_screenReaderOn) {
+      AccessibilityMode.announce(
+          '$message Double tap Voice command to try again.');
+    } else {
+      // The automatic loop listens again after this, so no instruction needed.
+      unawaited(_announceAndListen(message));
+    }
+  }
+
+  /// Voice failed for a reason retrying will not fix. Say why once, stop the
+  /// automatic loop, and leave a way back that really works.
+  void _reportVoiceUnavailable(VoiceFailure failure) {
+    final reason = switch (failure) {
+      VoiceFailure.noInternet =>
+        'Voice commands need the internet, and this phone is not connected.',
+      VoiceFailure.permissionDenied =>
+        'Audio Learner is not allowed to use the microphone. A helper can '
+            'allow it in the phone settings.',
+      VoiceFailure.busy => 'The microphone is busy right now.',
+      _ => 'Voice commands are not available on this phone.',
+    };
+    if (_screenReaderOn) {
+      AccessibilityMode.announce('$reason All the buttons still work.',
+          assertive: true);
+      return;
+    }
+    setState(() {
+      _voiceUnavailable = failure;
+      _voiceSleeping = true;
+    });
+    final message = '$reason Swipes and double tap still work. '
+        'Tap the screen once to try voice again.';
+    unawaited(HapticFeedback.mediumImpact().catchError((_) {}));
+    unawaited(() async {
+      await _tts.speakAndWait(message);
+      _noteSpoke(message);
+    }());
+  }
+
+  /// Re-arms the automatic listening window a bounded number of times, then
   /// enters a gentle "mic sleep" state. When budget is exhausted the student
   /// hears a one-time spoken notice ("Microphone paused. Tap to speak."), a
   /// haptic pulse is fired, and [_voiceSleeping] is set to true. A single tap
   /// anywhere on the screen then calls [_wakeVoiceFromSleep] to reopen the
-  /// microphone without replaying the full announcement.
+  /// microphone without replaying the full announcement. Voice-first mode only.
   void _retryListen(int session) {
     if (!mounted || _voiceLoopSuspended || session != _voiceLoopSession) return;
+    if (_screenReaderOn) return;
     _silentWindows++;
     if (_silentWindows >= _maxSilentWindows) {
-      _voiceSleeping = true;
+      setState(() => _voiceSleeping = true);
       // One-time spoken nudge so the student knows what happened and how to
       // recover. Deliberately kept short — it should not re-trigger listening.
       const notice = 'Microphone paused. Tap anywhere to speak.';
-      if (_screenReaderOn) {
-        AccessibilityMode.announce(notice);
-      } else {
-        unawaited(() async {
-          await HapticFeedback.mediumImpact();
-          final tts = ref.read(ttsServiceProvider);
-          await tts.speakAndWait(notice);
-        }());
-      }
+      unawaited(HapticFeedback.mediumImpact().catchError((_) {}));
+      unawaited(() async {
+        await _tts.speakAndWait(notice);
+        _noteSpoke(notice);
+      }());
       return;
     }
-    unawaited(_listenForVoiceCommand(session, allowUnderScreenReader: true));
+    unawaited(_openVoiceWindow(session, pushToTalk: false));
   }
 
-  /// Wakes the microphone after it entered the sleep state. Resets the silent
-  /// window budget, clears [_voiceSleeping], plays the listen cue, then opens
-  /// a fresh voice command window. Safe to call even when the mic is not
-  /// sleeping (it becomes a standard forced re-arm in that case).
+  /// Wakes the microphone after it went to sleep or was found unavailable.
+  /// Resets the budgets, plays the listen cue, then opens a window whose
+  /// outcome is always reported — so a tap is never met with silence. Safe to
+  /// call even when the mic is not sleeping.
   void _wakeVoiceFromSleep() {
-    if (!mounted || _voiceLoopSuspended) return;
-    _voiceSleeping = false;
+    if (!mounted || _voiceLoopSuspended || _screenReaderOn) return;
+    setState(() {
+      _voiceSleeping = false;
+      _voiceUnavailable = null;
+    });
     _silentWindows = 0;
+    _busyRetries = 0;
     final session = ++_voiceLoopSession;
     unawaited(() async {
+      await ref.read(sttServiceProvider).stopListening();
       await _cueListening();
       if (!mounted || session != _voiceLoopSession) return;
-      await _listenForVoiceCommand(session, allowUnderScreenReader: true);
+      await _openVoiceWindow(session, pushToTalk: true);
     }());
   }
 
@@ -711,10 +873,12 @@ class _StudentLearningHubScreenState
 
   bool _dispatchVoiceCommand(String heard) {
     if (!mounted) return false;
-    final command = heard.toLowerCase().trim();
+    final command = normalizeCommand(heard);
     if (command.isEmpty) return false;
 
-    bool has(List<String> phrases) => phrases.any(command.contains);
+    // Whole words only — see containsPhrase for the words substring matching
+    // used to trip over.
+    bool has(List<String> phrases) => containsAnyPhrase(command, phrases);
 
     // A real spoken command is short ("science", "answer two", "open food").
     // A long phrase containing a subject name or a number is almost always
@@ -738,21 +902,18 @@ class _StudentLearningHubScreenState
     }
 
     // In an active quiz, "answer two" / "option three" / a bare number picks
-    // an option directly and submits it.
-    if (_stage == LearningStage.quiz &&
-        !_quizAnswered &&
-        !_quizComplete &&
-        isShortPhrase) {
-      final answer = _answerNumberFromCommand(command);
-      if (answer != null) {
-        final question = _currentQuizQuestion();
-        if (question != null) {
-          final options = _quizOptions(question);
-          if (answer >= 1 && answer <= options.length) {
-            setState(() => _answerIndex = answer - 1);
-            unawaited(_selectQuizAnswer());
-            return true;
-          }
+    // an option directly and submits it. The phrase must be essentially just
+    // the number (answerNumberFromCommand): submitting is irreversible, so
+    // "question 3 of 5" or TalkBack reading "Option 2: ..." must never count.
+    if (_stage == LearningStage.quiz && !_quizAnswered && !_quizComplete) {
+      final question = _currentQuizQuestion();
+      if (question != null) {
+        final options = _quizOptions(question);
+        final answer =
+            answerNumberFromCommand(command, optionCount: options.length);
+        if (answer != null) {
+          unawaited(_submitAnswer(answer - 1));
+          return true;
         }
       }
     }
@@ -873,10 +1034,10 @@ class _StudentLearningHubScreenState
           _stage == LearningStage.quizConfirm ||
           _stage == LearningStage.quiz;
       if (wasInLesson) unawaited(_endVoiceSession());
+      _stopLessonAudio();
       setState(() {
         _stage = LearningStage.subjects;
         _topicIndex = 0;
-        _lessonPlaying = false;
         _quizAnswered = false;
         _quizComplete = false;
         _score = 0;
@@ -888,37 +1049,53 @@ class _StudentLearningHubScreenState
     return true;
   }
 
-  /// Adjusts the TTS playback speed by one step. If a lesson is currently
-  /// playing, restarts it at the new speed so the change is heard right
-  /// away; otherwise just confirms the change and resumes listening.
-  ///
-  /// The confirmation is spoken AT the new rate and includes the level
-  /// ("speed 2 of 6"), so the student immediately hears the difference and
-  /// knows how much slower or faster they can still go.
   // ── Ask a question (offline, content-bound retrieval) ────────────────────
 
   /// Opens a one-shot prompt: "What is your question?", captures the spoken
   /// question, then answers it from the current lesson's text.
+  ///
+  /// Under a screen reader the student activated "Ask a question" themselves,
+  /// so the tone alone is the prompt (anything announced would be spoken by
+  /// TalkBack into the open microphone).
   Future<void> _enterAskMode() async {
     if (!mounted) return;
     final session = ++_voiceLoopSession;
     await ref.read(sttServiceProvider).stopListening();
-    ref.read(ttsServiceProvider).stop();
-    if (mounted) setState(() => _lessonPlaying = false);
-    const prompt = 'What is your question?';
-    await ref.read(ttsServiceProvider).speakAndWait(prompt);
-    _noteSpoke(prompt);
+    _stopLessonAudio();
+    await ref.read(ttsServiceProvider).stop();
     if (!mounted || session != _voiceLoopSession) return;
+    if (!_screenReaderOn) {
+      const prompt = 'What is your question?';
+      await ref.read(ttsServiceProvider).speakAndWait(prompt);
+      _noteSpoke(prompt);
+      if (!mounted || session != _voiceLoopSession) return;
+    }
     await _listenForQuestion(session);
   }
+
+  /// How to carry on after an answer, in the current mode's terms.
+  String get _afterAnswerHint => _screenReaderOn
+      ? 'Double tap Ask a question to ask another, or play the lesson to '
+          'keep listening.'
+      : 'Ask another question, or say play to keep listening.';
 
   /// Listens for a free-form spoken question (longer window than a command).
   Future<void> _listenForQuestion(int session) async {
     final stt = ref.read(sttServiceProvider);
+    await _tts.whenIdle().timeout(const Duration(seconds: 20), onTimeout: () {});
+    if (!mounted || session != _voiceLoopSession) return;
     final ready = await stt.initialize();
-    if (!ready || !mounted || session != _voiceLoopSession) return;
+    if (!mounted || session != _voiceLoopSession) return;
+    if (!ready) {
+      _reportVoiceUnavailable(await stt.unavailableReason());
+      return;
+    }
 
-    await Future<void>.delayed(const Duration(milliseconds: 450));
+    if (_screenReaderOn) {
+      await _cueListening();
+    } else {
+      await Future<void>.delayed(_micSettleGap);
+    }
     if (!mounted || session != _voiceLoopSession) return;
 
     var handled = false;
@@ -932,13 +1109,24 @@ class _StudentLearningHubScreenState
       unawaited(stt.stopListening());
       if (_isEcho(question)) {
         unawaited(_announceAndListen(
-            'I did not catch that. Say play to keep listening, or ask again.'));
+            'I did not catch that. $_afterAnswerHint'));
       } else {
         unawaited(_answerQuestion(question));
       }
     }
 
-    stt.startListening(
+    void nothingHeard(VoiceFailure failure) {
+      if (handled || session != _voiceLoopSession) return;
+      handled = true;
+      if (failure == VoiceFailure.noSpeech) {
+        unawaited(_announceAndListen(
+            'I did not hear a question. $_afterAnswerHint'));
+      } else {
+        _reportVoiceUnavailable(failure);
+      }
+    }
+
+    final started = await stt.startListening(
       listenFor: const Duration(seconds: 30),
       pauseFor: const Duration(seconds: 10),
       onPartial: (words) {
@@ -949,23 +1137,28 @@ class _StudentLearningHubScreenState
       },
       onResult: handleQuestion,
       onDone: () {
-        if (handled || session != _voiceLoopSession) return;
         if (longestPartial.isNotEmpty) {
           handleQuestion(longestPartial);
         } else {
-          handled = true;
-          unawaited(_announceAndListen(
-              'I did not hear a question. Say play to keep learning.'));
+          nothingHeard(VoiceFailure.noSpeech);
+        }
+      },
+      onError: (message) {
+        if (longestPartial.isNotEmpty) {
+          handleQuestion(longestPartial);
+        } else {
+          nothingHeard(SttService.classifyError(message));
         }
       },
     );
+    if (!started) nothingHeard(VoiceFailure.busy);
   }
 
   /// Answers [question] using only the current lesson text, then re-arms the
   /// normal command listener.
   Future<void> _answerQuestion(String question) async {
-    ref.read(ttsServiceProvider).stop();
-    if (mounted) setState(() => _lessonPlaying = false);
+    _stopLessonAudio();
+    await ref.read(ttsServiceProvider).stop();
 
     final lesson = _currentLesson();
     final text = lesson?.rawText ?? '';
@@ -975,15 +1168,19 @@ class _StudentLearningHubScreenState
     if (answer == null || answer.trim().isEmpty) {
       await _announceAndListen(
           'I could not find that in this lesson. Try asking in different '
-          'words, or say play to keep listening.');
+          'words. $_afterAnswerHint');
     } else {
-      await _announceSequenceAndListen([
-        answer,
-        'Ask another question, or say play to keep listening.',
-      ]);
+      await _announceSequenceAndListen([answer, _afterAnswerHint]);
     }
   }
 
+  /// Adjusts the TTS playback speed by one step. If a lesson is currently
+  /// playing, restarts it at the new speed so the change is heard right
+  /// away; otherwise just confirms the change and resumes listening.
+  ///
+  /// The confirmation is spoken AT the new rate and includes the level
+  /// ("speed 2 of 6"), so the student immediately hears the difference and
+  /// knows how much slower or faster they can still go.
   Future<void> _changeSpeechRate({required bool slower}) async {
     final tts = ref.read(ttsServiceProvider);
 
@@ -995,6 +1192,9 @@ class _StudentLearningHubScreenState
     // segment was still speaking, which is exactly what broke playback.
     final resuming = _lessonPlaying && _currentLesson() != null;
     final session = ++_voiceLoopSession;
+    // Claim playback before stopping, so the run being stopped knows it was
+    // superseded rather than ended, and leaves "Playing" set for the resume.
+    final playback = resuming ? ++_playbackToken : _playbackToken;
     if (resuming) {
       await tts.stop();
       if (!mounted || session != _voiceLoopSession) return;
@@ -1015,7 +1215,7 @@ class _StudentLearningHubScreenState
     if (resuming) {
       _logVoiceEvent(
           'repeat', 'Adjust speed', 'Continuing lesson at new speed.');
-      unawaited(_announceThenResumeLesson(session, label));
+      unawaited(_announceThenResumeLesson(session, playback, label));
       return;
     }
 
@@ -1078,26 +1278,11 @@ class _StudentLearningHubScreenState
   }
 
   void _onTwoFingerTap() {
+    // Two-finger taps are TalkBack's own gesture (pause/resume its speech).
+    if (_screenReaderOn) return;
     _silentWindows = 0;
     HapticFeedback.selectionClick();
     unawaited(_changeSpeechRate(slower: false));
-  }
-
-  /// Extracts a 1-4 answer number from a spoken quiz response, e.g.
-  /// "answer two", "option 3", or just "four".
-  int? _answerNumberFromCommand(String command) {
-    const words = {
-      'one': 1,
-      'two': 2,
-      'three': 3,
-      'four': 4,
-    };
-    for (final entry in words.entries) {
-      if (command.contains(entry.key)) return entry.value;
-    }
-    final match = RegExp(r'[1-4]').firstMatch(command);
-    if (match != null) return int.parse(match.group(0)!);
-    return null;
   }
 
   // ── Voice session analytics ─────────────────────────────────────────────
@@ -1244,9 +1429,9 @@ class _StudentLearningHubScreenState
   int? _subjectIndexFromCommand(String command) {
     final subjects = _subjects();
     for (var i = 0; i < subjects.length; i++) {
-      final name = subjects[i].name.toLowerCase().trim();
+      final name = normalizeCommand(subjects[i].name);
       if (name.isEmpty) continue;
-      if (command.contains(name)) return i;
+      if (containsPhrase(command, name)) return i;
       if (command.length >= 4 && name.contains(command)) return i;
     }
     return null;
@@ -1278,7 +1463,22 @@ class _StudentLearningHubScreenState
     return items;
   }
 
-  void _announceCurrentState({bool force = false}) {
+  /// Tells the student where they are after a change.
+  ///
+  /// Voice-first mode: speaks the state with our TTS, then listens.
+  ///
+  /// Screen-reader mode, [force] (the screen's content was replaced — a new
+  /// stage, a new question, back navigation, "repeat"): moves TalkBack's focus
+  /// to the new content, which TalkBack then reads once. Announcing it as well
+  /// is what made the student hear everything twice, and leaving focus where it
+  /// was is what sent TalkBack back to the status bar. [refocus] false skips
+  /// this when the Navigator is already restoring focus (returning from a
+  /// dialog or another screen).
+  ///
+  /// Screen-reader mode, not [force] (the student pressed Next or Previous
+  /// subject/topic and that button is still under their finger): focus stays
+  /// put so they can press again, and a short announcement says what changed.
+  void _announceCurrentState({bool force = false, bool refocus = true}) {
     if (!mounted) return;
 
     final key = switch (_stage) {
@@ -1299,29 +1499,19 @@ class _StudentLearningHubScreenState
     _voiceSleeping = false;
 
     final session = ++_voiceLoopSession;
+
+    if (_screenReaderOn) {
+      if (!shouldSpeak) return;
+      if (force) {
+        if (refocus) _requestFocus(_primaryFocusTarget());
+      } else {
+        AccessibilityMode.announce(_screenReaderAnnouncementText());
+      }
+      return;
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted || session != _voiceLoopSession) return;
-
-      // Screen-reader mode: hand the announcement to TalkBack instead of
-      // speaking it ourselves. Announcing through the semantics layer means
-      // ONE voice, at the student's own configured rate and pitch, using the
-      // engine they already know — instead of our TTS talking over theirs.
-      if (_screenReaderOn) {
-        if (shouldSpeak) {
-          final text = _screenReaderAnnouncementText();
-          AccessibilityMode.announce(text);
-          if (_voiceAutoListen) {
-            final wordsCount =
-                text.split(' ').where((w) => w.isNotEmpty).length;
-            final approxMs = (wordsCount * 320).clamp(1800, 5000);
-            await Future<void>.delayed(Duration(milliseconds: approxMs));
-            if (!mounted || session != _voiceLoopSession) return;
-            await _listenForVoiceCommand(session, allowUnderScreenReader: true);
-          }
-        }
-        return;
-      }
-
       // Free the microphone before speaking (see _announceAndListen).
       await ref.read(sttServiceProvider).stopListening();
       if (!mounted || session != _voiceLoopSession) return;
@@ -1331,15 +1521,34 @@ class _StudentLearningHubScreenState
         _noteSpoke(text);
       }
       if (!mounted || session != _voiceLoopSession) return;
-      await _listenForVoiceCommand(session);
+      await _openVoiceWindow(session, pushToTalk: false);
     });
   }
 
+  /// The element that carries the current stage's meaning.
+  _FocusTarget _primaryFocusTarget() {
+    if (_stage != LearningStage.quiz) return _FocusTarget.card;
+    return _quizAnswered ? _FocusTarget.feedback : _FocusTarget.question;
+  }
+
+  /// Sends TalkBack's focus to [target] once the next frame is built.
+  void _requestFocus(_FocusTarget target) {
+    if (!mounted || !_screenReaderOn) return;
+    setState(() {
+      _focusTarget = target;
+      _focusRequest = AccessibilityFocusTarget.newRequest();
+    });
+  }
+
+  /// The focus request for [target], or null if focus should not move to it.
+  int? _focusRequestFor(_FocusTarget target) =>
+      _focusTarget == target ? _focusRequest : null;
+
+  /// Short spoken update for a change made with a button that stays focused
+  /// (Next/Previous subject or topic).
   String _screenReaderAnnouncementText() {
     final subjects = _subjects();
-    if (subjects.isEmpty) {
-      return 'No subjects available. Tap join class at the top to join a class.';
-    }
+    if (subjects.isEmpty) return 'No subjects available.';
 
     final subject = subjects[_subjectIndex.clamp(0, subjects.length - 1)];
     final topics = _topicsForSubject(subject);
@@ -1348,22 +1557,17 @@ class _StudentLearningHubScreenState
       case LearningStage.subjects:
         return '${subject.name}. ${_subjectIndex + 1} of ${subjects.length}.';
       case LearningStage.topics:
+      case LearningStage.lesson:
         if (topics.isEmpty) return 'No topics available.';
         final topic = topics[_topicIndex.clamp(0, topics.length - 1)];
         return '${topic.name}. ${_topicIndex + 1} of ${topics.length}.';
-      case LearningStage.lesson:
-        if (topics.isEmpty) return 'No lesson available.';
-        final topic = topics[_topicIndex.clamp(0, topics.length - 1)];
-        return '${topic.name}. Ready to play.';
       case LearningStage.quizConfirm:
-        return 'Ready for quiz. Double tap to begin.';
+        return 'Ready for the questions.';
       case LearningStage.quiz:
-        if (_quizComplete) {
-          return 'Quiz complete. Score $_score of ${_questionsCount()}.';
-        }
         final question = _currentQuizQuestion();
         if (question == null) return 'No questions available.';
-        return 'Question ${_questionIndex + 1} of ${_questionsCount()}. ${question.questionText}.';
+        return 'Question ${_questionIndex + 1} of ${_questionsCount()}. '
+            '${question.questionText}';
     }
   }
 
@@ -1496,6 +1700,7 @@ class _StudentLearningHubScreenState
       return;
     }
 
+    _stopLessonAudio();
     setState(() {
       _subjectIndex = next;
       _topicIndex = 0;
@@ -1503,7 +1708,6 @@ class _StudentLearningHubScreenState
       _quizAnswered = false;
       _quizComplete = false;
       _score = 0;
-      _lessonPlaying = false;
     });
     _announceCurrentState();
   }
@@ -1526,9 +1730,9 @@ class _StudentLearningHubScreenState
           _stage == LearningStage.quizConfirm ||
           _stage == LearningStage.quiz;
       if (wasInLesson) unawaited(_endVoiceSession());
+      _stopLessonAudio();
       setState(() {
         _stage = LearningStage.subjects;
-        _lessonPlaying = false;
         _quizAnswered = false;
         _quizComplete = false;
         _score = 0;
@@ -1550,9 +1754,9 @@ class _StudentLearningHubScreenState
       unawaited(_endVoiceSession());
     }
 
+    _stopLessonAudio();
     setState(() {
       _topicIndex = next;
-      _lessonPlaying = false;
       _quizAnswered = false;
       _quizComplete = false;
       _score = 0;
@@ -1607,6 +1811,7 @@ class _StudentLearningHubScreenState
     _segmentsLessonId = null;
     _lessonSegmentIndex = 0;
     _pausedCharOffset = 0;
+    _lessonStarted = false;
     _announceCurrentState(force: true);
     unawaited(_startVoiceSessionForCurrentLesson());
   }
@@ -1617,20 +1822,26 @@ class _StudentLearningHubScreenState
 
     if (_lessonPlaying) {
       // Pause: stop speaking but keep our place so play resumes here.
-      setState(() => _lessonPlaying = false);
-      ref.read(ttsServiceProvider).stop();
+      _stopLessonAudio();
       _logVoiceEvent('pause', 'Pause lesson', 'Paused.');
-      unawaited(_announceAndListen('Paused. Double tap to resume.'));
+      // TalkBack users hear one word; the focused control already says
+      // "double tap to play".
+      unawaited(_announceAndListen(
+          _screenReaderOn ? 'Paused.' : 'Paused. Double tap to resume.'));
     } else {
       // Play, or resume from the exact word we paused on.
       _ensureLessonSegments(lesson);
-      setState(() => _lessonPlaying = true);
+      setState(() {
+        _lessonPlaying = true;
+        _lessonStarted = true;
+      });
       final resuming = _lessonSegmentIndex != 0 || _pausedCharOffset != 0;
       _logVoiceEvent('repeat', 'Play lesson',
           resuming ? 'Resuming.' : 'Playing lesson audio.');
       final session = ++_voiceLoopSession;
       unawaited(_playLessonFrom(
         session,
+        ++_playbackToken,
         _lessonSegmentIndex,
         startCharOffset: _pausedCharOffset,
       ));
@@ -1641,14 +1852,18 @@ class _StudentLearningHubScreenState
     final lesson = _currentLesson();
     if (lesson == null) return;
 
+    final playback = ++_playbackToken;
     ref.read(ttsServiceProvider).stop();
     _ensureLessonSegments(lesson);
     _lessonSegmentIndex = 0; // replay restarts from the beginning
     _pausedCharOffset = 0;
-    setState(() => _lessonPlaying = true);
+    setState(() {
+      _lessonPlaying = true;
+      _lessonStarted = true;
+    });
     _logVoiceEvent('repeat', 'Replay lesson', 'Replaying from the start.');
     final session = ++_voiceLoopSession;
-    unawaited(_playLessonFrom(session, 0));
+    unawaited(_playLessonFrom(session, playback, 0));
   }
 
   /// Splits [lesson] into playback segments the first time it is played (or
@@ -1659,7 +1874,31 @@ class _StudentLearningHubScreenState
       _lessonSegments = splitLessonIntoSegments(lesson.rawText);
       _lessonSegmentIndex = 0;
       _pausedCharOffset = 0;
+      _lessonStarted = false;
       _segmentsLessonId = lesson.id;
+    }
+  }
+
+  /// Under TalkBack, the double tap that started an action is followed by
+  /// TalkBack's own feedback — its activation sound, and often a re-read of the
+  /// focused control, whose label has just changed (Play → Pause). There is no
+  /// API to learn when that ends. Speaking at once made the first words of the
+  /// lesson collide with it, so this one short, fixed pause is deliberate.
+  /// Voice-first mode has no such feedback and does not wait.
+  Future<void> _letTalkBackFinishActivation() async {
+    if (_screenReaderOn) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+  }
+
+  /// Ends playback run [playback]: clears "Playing" unless a newer run has
+  /// taken over. Every exit from [_playLessonFrom] goes through here, which is
+  /// what keeps the play/pause state true — previously a lesson silenced by
+  /// another flow (a dialog, the progress screen, a voice command) left the
+  /// card saying "Playing" over silence.
+  void _endPlaybackRun(int playback) {
+    if (mounted && playback == _playbackToken && _lessonPlaying) {
+      setState(() => _lessonPlaying = false);
     }
   }
 
@@ -1671,23 +1910,18 @@ class _StudentLearningHubScreenState
   /// segment rather than skipping it.
   Future<void> _playLessonFrom(
     int session,
+    int playback,
     int startIndex, {
     int startCharOffset = 0,
+    bool settle = true,
   }) async {
     final tts = ref.read(ttsServiceProvider);
-    await ref.read(sttServiceProvider).stopListening();
-    if (!mounted || session != _voiceLoopSession || !_lessonPlaying) return;
+    bool interrupted() =>
+        !mounted || session != _voiceLoopSession || !_lessonPlaying;
 
-    // Settle delay under screen reader: TalkBack's activation click or button
-    // announcement may still be completing. Without this settle delay, Android's
-    // TTS audio focus request collides with TalkBack and fails immediately,
-    // causing speakAndWait to return false.
-    if (_screenReaderOn) {
-      // 500ms settle delay gives TalkBack's button click feedback and focus
-      // announcement time to finish completely before Flutter TTS speaks lesson audio.
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      if (!mounted || session != _voiceLoopSession || !_lessonPlaying) return;
-    }
+    await ref.read(sttServiceProvider).stopListening();
+    if (settle) await _letTalkBackFinishActivation();
+    if (interrupted()) return _endPlaybackRun(playback);
 
     // Safety net: never let a play action fall straight through to "end of
     // lesson". If segmentation produced nothing (e.g. a lesson whose text was
@@ -1697,25 +1931,18 @@ class _StudentLearningHubScreenState
       final lesson = _currentLesson();
       final raw = lesson?.rawText.trim() ?? '';
       if (raw.isEmpty) {
-        if (mounted) setState(() => _lessonPlaying = false);
+        _endPlaybackRun(playback);
         unawaited(
             _announceAndListen('This lesson has no content to read yet.'));
         return;
       }
-      var ok = await tts.speakAndWait(raw);
-      if (!ok && _screenReaderOn && mounted && session == _voiceLoopSession && _lessonPlaying) {
-        await Future<void>.delayed(const Duration(milliseconds: 300));
-        if (mounted && session == _voiceLoopSession && _lessonPlaying) {
-          ok = await tts.speakAndWait(raw);
-        }
-      }
-      if (!mounted || session != _voiceLoopSession || !_lessonPlaying) return;
-      if (ok && lesson != null) unawaited(_recordLessonCompleted(lesson.id));
-      if (mounted) setState(() => _lessonPlaying = false);
-      unawaited(_announceAndListen(
-        'End of lesson. Say quiz for the questions, repeat to hear it again, '
-        'or next for the next topic.',
-      ));
+      final ok = await tts.speakAndWait(raw);
+      if (interrupted()) return _endPlaybackRun(playback);
+      _endPlaybackRun(playback);
+      if (!ok) return _reportPlaybackFailed();
+      _lessonStarted = false;
+      if (lesson != null) unawaited(_recordLessonCompleted(lesson.id));
+      unawaited(_announceAndListen(_endOfLessonText()));
       return;
     }
 
@@ -1727,7 +1954,7 @@ class _StudentLearningHubScreenState
     }
 
     for (var i = startIndex; i < _lessonSegments.length; i++) {
-      if (!mounted || session != _voiceLoopSession || !_lessonPlaying) return;
+      if (interrupted()) return _endPlaybackRun(playback);
       _lessonSegmentIndex = i;
 
       // Only the first segment of a resume starts partway through; every
@@ -1737,29 +1964,22 @@ class _StudentLearningHubScreenState
           (i == startIndex) ? startCharOffset.clamp(0, segmentText.length) : 0;
       final toSpeak = base == 0 ? segmentText : segmentText.substring(base);
 
-      var completed = await tts.speakAndWait(toSpeak);
-      if (!completed && _screenReaderOn && mounted && session == _voiceLoopSession && _lessonPlaying) {
-        // If TalkBack was still speaking and cancelled the utterance, retry once
-        await Future<void>.delayed(const Duration(milliseconds: 300));
-        if (mounted && session == _voiceLoopSession && _lessonPlaying) {
-          completed = await tts.speakAndWait(toSpeak);
-        }
-      }
+      final completed = await tts.speakAndWait(toSpeak);
 
       // Interrupted (paused, navigated, or superseded): remember exactly where
       // so the next play resumes from this word, not the segment start.
-      if (!mounted || session != _voiceLoopSession || !_lessonPlaying) {
+      if (interrupted()) {
         _lessonSegmentIndex = i;
         _pausedCharOffset = base + tts.spokenWordStart;
-        return;
+        return _endPlaybackRun(playback);
       }
       if (!completed) {
-        // Engine error mid-segment — stop cleanly and announce error under screen reader
-        if (mounted) setState(() => _lessonPlaying = false);
-        if (_screenReaderOn) {
-          AccessibilityMode.announce('Could not play lesson audio. Tap Play to try again.');
-        }
-        return;
+        // The engine failed or refused this segment. Keep the place, stop
+        // honestly, and say so — silence here would read as "still playing".
+        _lessonSegmentIndex = i;
+        _pausedCharOffset = base;
+        _endPlaybackRun(playback);
+        return _reportPlaybackFailed();
       }
 
       _lessonSegmentIndex = i + 1;
@@ -1771,7 +1991,7 @@ class _StudentLearningHubScreenState
       final gap = _lessonSegments[i].pauseAfter;
       if (gap > Duration.zero && i + 1 < _lessonSegments.length) {
         await Future<void>.delayed(gap);
-        if (!mounted || session != _voiceLoopSession || !_lessonPlaying) return;
+        if (interrupted()) return _endPlaybackRun(playback);
       }
     }
 
@@ -1786,36 +2006,60 @@ class _StudentLearningHubScreenState
     // "repeat", or "next".
     _pausedCharOffset = 0;
     _lessonSegmentIndex = 0;
-    if (mounted) setState(() => _lessonPlaying = false);
+    _lessonStarted = false;
+    _endPlaybackRun(playback);
     if (!mounted || session != _voiceLoopSession) return;
-    unawaited(_announceAndListen(
-      'End of lesson. Say quiz for the questions, repeat to hear it again, '
-      'or next for the next topic.',
-    ));
+    unawaited(_announceAndListen(_endOfLessonText()));
+  }
+
+  String _endOfLessonText() => _screenReaderOn
+      ? 'End of lesson.'
+      : 'End of lesson. Say quiz for the questions, repeat to hear it again, '
+          'or next for the next topic.';
+
+  void _reportPlaybackFailed() {
+    if (!mounted) return;
+    if (_screenReaderOn) {
+      AccessibilityMode.announce(
+          'The lesson could not be read aloud. Double tap play to try again.',
+          assertive: true);
+    } else {
+      unawaited(_announceAndListen(
+          'The lesson could not be read aloud. Double tap to try again.'));
+    }
   }
 
   /// Speaks [label] (e.g. a speed-change confirmation) then continues the
   /// lesson from the current segment, so adjusting speed mid-lesson resumes
   /// where the student was instead of restarting.
-  Future<void> _announceThenResumeLesson(int session, String label) async {
+  ///
+  /// The label is spoken in the lesson's own voice in both modes. Under
+  /// TalkBack an announcement would be spoken by a second voice at the same
+  /// moment the lesson resumes; in sequence on one voice, the student also
+  /// hears the new speed itself.
+  Future<void> _announceThenResumeLesson(
+      int session, int playback, String label) async {
     final tts = ref.read(ttsServiceProvider);
     await ref.read(sttServiceProvider).stopListening();
-    if (!mounted || session != _voiceLoopSession) return;
-    if (_screenReaderOn) {
-      AccessibilityMode.announce(label);
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-    } else {
-      await tts.speakAndWait(label);
+    await _letTalkBackFinishActivation();
+    if (!mounted || session != _voiceLoopSession) {
+      return _endPlaybackRun(playback);
     }
-    if (!mounted || session != _voiceLoopSession || !_lessonPlaying) return;
+    await tts.speakAndWait(label);
+    if (!mounted || session != _voiceLoopSession || !_lessonPlaying) {
+      return _endPlaybackRun(playback);
+    }
     await _playLessonFrom(
       session,
+      playback,
       _lessonSegmentIndex,
       startCharOffset: _pausedCharOffset,
+      settle: false,
     );
   }
 
   void _openQuizConfirmation() {
+    _stopLessonAudio();
     setState(() {
       _stage = LearningStage.quizConfirm;
     });
@@ -1835,6 +2079,7 @@ class _StudentLearningHubScreenState
       return;
     }
 
+    _stopLessonAudio();
     setState(() {
       _stage = LearningStage.quiz;
       _questionIndex = 0;
@@ -1843,11 +2088,18 @@ class _StudentLearningHubScreenState
       _quizComplete = false;
       _score = 0;
     });
+    _announcementKey = 'quiz:$_subjectIndex:$_topicIndex:0:0:false:false';
+    // Under TalkBack the answers are ordinary buttons, so there is nothing to
+    // explain: focus goes to the first question and TalkBack reads it.
+    if (_screenReaderOn) {
+      _voiceLoopSession++;
+      _requestFocus(_FocusTarget.question);
+      return;
+    }
     // Instructions are spoken ONCE here, then every question announcement is
     // just "Question N of M + the highlighted option". Repeating the "swipe /
     // double tap" guidance on all M questions drowned the actual content —
     // by ear, redundancy is cost, not reassurance. "Help" re-speaks it.
-    _announcementKey = 'quiz:$_subjectIndex:$_topicIndex:0:0:false:false';
     unawaited(_announceSequenceAndListen([
       _quizInstructionsText(questions.length),
       _announcementText(),
@@ -1861,6 +2113,8 @@ class _StudentLearningHubScreenState
         'to choose. Say help to hear these instructions again.';
   }
 
+  /// Moves the voice/gesture answer cursor. It only points; choosing is a
+  /// separate, explicit action.
   void _moveQuizAnswer(int delta) {
     final question = _currentQuizQuestion();
     if (question == null || _quizAnswered || _quizComplete) return;
@@ -1877,58 +2131,51 @@ class _StudentLearningHubScreenState
         'Option ${_answerIndex + 1}. ${options[_answerIndex].text}'));
   }
 
-  Future<void> _selectQuizOption(int index) async {
-    final question = _currentQuizQuestion();
-    if (question == null) return;
-    final options = _quizOptions(question);
-    if (options.isEmpty) return;
-    if (_quizAnswered || _quizComplete) return;
-
-    setState(() => _answerIndex = index.clamp(0, options.length - 1));
-    await _selectQuizAnswer();
-  }
-
+  /// Double tap (gesture) or "select" (voice): submits the answer under the
+  /// cursor, or moves on once the question is answered.
   Future<void> _selectQuizAnswer() async {
-    final question = _currentQuizQuestion();
-    if (question == null) return;
-
-    final options = _quizOptions(question);
-    if (options.isEmpty) return;
-
     if (_quizAnswered) {
-      if (_questionIndex >= _questionsCount() - 1) {
-        setState(() {
-          _stage = LearningStage.lesson;
-          _quizComplete = false;
-          _quizAnswered = false;
-        });
-        _announceCurrentState(force: true);
-        return;
-      }
-      _nextQuizQuestion();
+      _continueQuiz();
       return;
     }
+    await _submitAnswer(_answerIndex);
+  }
 
-    final selected = options[_answerIndex.clamp(0, options.length - 1)];
-    final selectedIndex = options.indexOf(selected);
-    final boundedIndex = selectedIndex < 0
-        ? 0
-        : selectedIndex > 3
-            ? 3
-            : selectedIndex;
-    final selectedLetter = const ['A', 'B', 'C', 'D'][boundedIndex];
+  /// The letter ('A'..'D') stored in [Question.correctOption] for [option].
+  ///
+  /// Taken from the option's own label, not its position in the list: empty
+  /// options are left out of that list, so a position-based letter graded the
+  /// fourth answer as "C" whenever option C was blank.
+  static String _letterOf(_QuizOption option) =>
+      const ['A', 'B', 'C', 'D'][int.parse(option.label) - 1];
+
+  /// Submits answer [index] of the current question — the one action that
+  /// chooses an answer. Every path (an answer button, a voice number, the
+  /// gesture double tap) ends here, and it does nothing once the question is
+  /// answered, so a late or repeated activation can never answer the next
+  /// question on the student's behalf.
+  Future<void> _submitAnswer(int index) async {
+    final question = _currentQuizQuestion();
+    if (question == null || _quizAnswered || _quizComplete) return;
+    final options = _quizOptions(question);
+    if (options.isEmpty) return;
+
+    final chosen = index.clamp(0, options.length - 1);
+    final selected = options[chosen];
+    final correct = question.correctOption.toUpperCase() == _letterOf(selected);
+    final isLast = _questionIndex >= _questionsCount() - 1;
 
     setState(() {
+      _answerIndex = chosen;
       _quizAnswered = true;
+      if (correct) _score += 1;
+      if (isLast) _quizComplete = true;
     });
-
-    final correct = question.correctOption.toUpperCase() == selectedLetter;
-    if (correct) _score += 1;
     _voiceQuestionsAnswered += 1;
     unawaited(_recordQuizResult(question.id, correct));
     _logVoiceEvent(
       'answer',
-      'Option ${_answerIndex + 1}: ${selected.text}',
+      'Option ${selected.label}: ${selected.text}',
       correct ? 'Correct' : 'Incorrect',
     );
 
@@ -1937,23 +2184,40 @@ class _StudentLearningHubScreenState
       correct ? HapticFeedback.mediumImpact() : HapticFeedback.heavyImpact(),
     );
 
-    // Speak corrective feedback, not just "Incorrect." A blind student can't
-    // glance back at the options to see what they missed, so on a wrong answer
-    // read out the correct option (and the lesson explanation when it adds
-    // something beyond restating that option) — turning the quiz into a
-    // learning moment delivered entirely through audio.
+    // Under TalkBack the answers just left the screen and the feedback took
+    // their place. Focus moves to it and TalkBack reads it — the same words
+    // spoken below, once, by one voice. The next swipe reaches "Next question".
+    if (_screenReaderOn) {
+      _voiceLoopSession++;
+      _requestFocus(_FocusTarget.feedback);
+      return;
+    }
+
+    final messages = <String>[_answerFeedbackText(question, correct)];
+    if (isLast) {
+      messages.add(_quizScoreText());
+      // Gesture-only guidance (no command words to echo back).
+      messages.add('Double tap to return to the lesson.');
+    } else {
+      messages.add('Double tap to go on.');
+    }
+    await _announceSequenceAndListen(messages);
+  }
+
+  String _quizScoreText() =>
+      'Quiz complete. Score $_score of ${_questionsCount()}.';
+
+  /// Corrective feedback, not just "Incorrect." A blind student can't glance
+  /// back at the options to see what they missed, so on a wrong answer this
+  /// reads out the correct option (and the lesson explanation when it adds
+  /// something beyond restating that option) — turning the quiz into a
+  /// learning moment delivered entirely through audio.
+  String _answerFeedbackText(Question question, bool correct) {
     final feedback = StringBuffer(correct ? 'Correct.' : 'Incorrect.');
     if (!correct) {
       final letter = question.correctOption.toUpperCase();
       final correctIndex = const ['A', 'B', 'C', 'D'].indexOf(letter);
-      final correctText = (switch (letter) {
-        'A' => question.optionA,
-        'B' => question.optionB,
-        'C' => question.optionC,
-        'D' => question.optionD ?? '',
-        _ => '',
-      })
-          .trim();
+      final correctText = _correctOptionText(question);
       if (correctIndex >= 0 && correctText.isNotEmpty) {
         feedback.write(
             ' The correct answer is option ${correctIndex + 1}. $correctText.');
@@ -1968,19 +2232,37 @@ class _StudentLearningHubScreenState
         feedback.write(' $explanation.');
       }
     }
+    return feedback.toString();
+  }
 
-    final messages = <String>[feedback.toString()];
-    final isLast = _questionIndex >= _questionsCount() - 1;
-    if (isLast) {
-      setState(() => _quizComplete = true);
-      messages.add('Quiz complete. Score $_score of ${_questionsCount()}.');
-      // Gesture-only guidance (no command words to echo back).
-      messages.add('Double tap to return to the lesson.');
+  String _correctOptionText(Question question) =>
+      (switch (question.correctOption.toUpperCase()) {
+        'A' => question.optionA,
+        'B' => question.optionB,
+        'C' => question.optionC,
+        'D' => question.optionD ?? '',
+        _ => '',
+      })
+          .trim();
+
+  /// "Next question" / "Finish quiz". Acts only on an answered question, so
+  /// it can never be mistaken for choosing an answer.
+  void _continueQuiz() {
+    if (_stage != LearningStage.quiz || !_quizAnswered) return;
+    if (_questionIndex >= _questionsCount() - 1) {
+      _finishQuiz();
     } else {
-      messages.add('Double tap to go on.');
+      _nextQuizQuestion();
     }
+  }
 
-    await _announceSequenceAndListen(messages);
+  void _finishQuiz() {
+    setState(() {
+      _stage = LearningStage.lesson;
+      _quizComplete = false;
+      _quizAnswered = false;
+    });
+    _announceCurrentState(force: true);
   }
 
   void _nextQuizQuestion() {
@@ -2001,6 +2283,7 @@ class _StudentLearningHubScreenState
       _quizAnswered = false;
       _quizComplete = false;
     });
+    // Under TalkBack: focus moves to the new question, which TalkBack reads.
     _announceCurrentState(force: true);
   }
 
@@ -2011,6 +2294,9 @@ class _StudentLearningHubScreenState
   }) {
     final isLast = _questionIndex >= questionsCount - 1;
     const accent = Color(0xFF1A56DB);
+    // Under TalkBack its own focus is the cursor; drawing ours as well made an
+    // answer look chosen before the student had chosen anything.
+    final showCursor = !AccessibilityMode.of(context).screenReaderEnabled;
 
     return Container(
       decoration: BoxDecoration(
@@ -2068,19 +2354,25 @@ class _StudentLearningHubScreenState
                   ),
                 ),
                 const SizedBox(height: 14),
-                // Question text
-                Semantics(
-                  header: true,
-                  label: 'Question ${_questionIndex + 1} of $questionsCount: ${question.questionText}',
-                  excludeSemantics: true,
-                  child: Text(
-                    question.questionText,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Color(0xFF123B7A),
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
-                      height: 1.25,
+                // Question text — the one node that says which question this
+                // is, and where TalkBack's focus lands for each new question.
+                AccessibilityFocusTarget(
+                  request: _focusRequestFor(_FocusTarget.question),
+                  child: Semantics(
+                    container: true,
+                    header: true,
+                    label: 'Question ${_questionIndex + 1} of $questionsCount. '
+                        '${question.questionText}',
+                    excludeSemantics: true,
+                    child: Text(
+                      question.questionText,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Color(0xFF123B7A),
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                        height: 1.25,
+                      ),
                     ),
                   ),
                 ),
@@ -2090,95 +2382,117 @@ class _StudentLearningHubScreenState
                 if (_quizAnswered) ...[
                   Builder(builder: (context) {
                     final selected = options[_answerIndex.clamp(0, options.length - 1)];
-                    final selectedIndex = options.indexOf(selected);
-                    final boundedIndex =
-                        selectedIndex < 0 ? 0 : selectedIndex > 3 ? 3 : selectedIndex;
-                    final selectedLetter = const ['A', 'B', 'C', 'D'][boundedIndex];
-                    final correct = question.correctOption.toUpperCase() == selectedLetter;
-                    final correctLetter = question.correctOption.toUpperCase();
-                    final correctText = (switch (correctLetter) {
-                      'A' => question.optionA,
-                      'B' => question.optionB,
-                      'C' => question.optionC,
-                      'D' => question.optionD ?? '',
-                      _ => '',
-                    }).trim();
+                    final correct =
+                        question.correctOption.toUpperCase() == _letterOf(selected);
+                    final correctNumber = const ['A', 'B', 'C', 'D']
+                            .indexOf(question.correctOption.toUpperCase()) +
+                        1;
+                    final correctText = _correctOptionText(question);
+                    final spoken = [
+                      'You chose option ${selected.label}.',
+                      _answerFeedbackText(question, correct),
+                      if (isLast) _quizScoreText(),
+                    ].join(' ');
 
-                    return Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: correct
-                            ? const Color(0xFF16A34A).withValues(alpha: 0.12)
-                            : const Color(0xFFDC2626).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: correct ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
-                          width: 1.5,
-                        ),
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
+                    // One node with the whole result, so TalkBack reads it in
+                    // one go when focus arrives here after answering.
+                    return AccessibilityFocusTarget(
+                      request: _focusRequestFor(_FocusTarget.feedback),
+                      child: Semantics(
+                        container: true,
+                        label: spoken,
+                        excludeSemantics: true,
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: correct
+                                ? const Color(0xFF16A34A).withValues(alpha: 0.12)
+                                : const Color(0xFFDC2626).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: correct ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Column(
                             children: [
-                              Icon(
-                                correct ? Icons.check_circle_rounded : Icons.cancel_rounded,
-                                color: correct ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
-                                size: 28,
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    correct ? Icons.check_circle_rounded : Icons.cancel_rounded,
+                                    color: correct ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                                    size: 28,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    correct ? 'Correct!' : 'Incorrect',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w900,
+                                      color: correct ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 8),
-                              Text(
-                                correct ? 'Correct!' : 'Incorrect',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w900,
-                                  color: correct ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                              if (!correct && correctText.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  // Numbered like the answer buttons and the
+                                  // spoken feedback, not lettered.
+                                  'Correct answer: Option $correctNumber: $correctText',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFF1F2937),
+                                  ),
                                 ),
-                              ),
+                              ],
+                              if (question.explanation.trim().isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Text(
+                                  question.explanation.trim(),
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.grey.shade700,
+                                  ),
+                                ),
+                              ],
+                              if (isLast) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Score: $_score of $questionsCount',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                    color: Color(0xFF123B7A),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
-                          if (!correct && correctText.isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            Text(
-                              'Correct answer: Option $correctLetter: $correctText',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF1F2937),
-                              ),
-                            ),
-                          ],
-                          if (question.explanation.trim().isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            Text(
-                              question.explanation.trim(),
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: Colors.grey.shade700,
-                              ),
-                            ),
-                          ],
-                        ],
+                        ),
                       ),
                     );
                   }),
                   const SizedBox(height: 16),
                   Semantics(
                     button: true,
-                    label: isLast ? 'Finish quiz. Score: $_score of $questionsCount' : 'Next question',
-                    hint: isLast
-                        ? 'Double tap to finish quiz and return to lesson'
-                        : 'Double tap for next question',
-                    onTap: _onDoubleTap,
+                    label: isLast ? 'Finish quiz' : 'Next question',
+                    onTapHint: isLast
+                        ? 'return to the lesson'
+                        : 'hear the next question',
+                    onTap: _continueQuiz,
                     excludeSemantics: true,
                     child: Material(
                       color: accent,
                       borderRadius: BorderRadius.circular(18),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(18),
-                        onTap: _onDoubleTap,
+                        onTap: _continueQuiz,
                         child: Container(
                           constraints: const BoxConstraints(minHeight: 56),
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
@@ -2211,14 +2525,17 @@ class _StudentLearningHubScreenState
                   for (var i = 0; i < options.length; i++) ...[
                     Builder(builder: (context) {
                       final opt = options[i];
-                      final isSelected = i == _answerIndex;
+                      final isSelected = showCursor && i == _answerIndex;
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 10),
+                        // Only an explicit activation (TalkBack double tap,
+                        // touch tap) chooses: TalkBack focusing an answer to
+                        // hear it calls nothing here.
                         child: Semantics(
                           button: true,
                           label: 'Option ${opt.label}: ${opt.text}',
-                          hint: 'Double tap to choose Option ${opt.label}',
-                          onTap: () => unawaited(_selectQuizOption(i)),
+                          onTapHint: 'choose this answer',
+                          onTap: () => unawaited(_submitAnswer(i)),
                           excludeSemantics: true,
                           child: Material(
                             color: isSelected
@@ -2227,7 +2544,7 @@ class _StudentLearningHubScreenState
                             borderRadius: BorderRadius.circular(16),
                             child: InkWell(
                               borderRadius: BorderRadius.circular(16),
-                              onTap: () => unawaited(_selectQuizOption(i)),
+                              onTap: () => unawaited(_submitAnswer(i)),
                               child: Container(
                                 constraints: const BoxConstraints(minHeight: 56),
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -2287,29 +2604,37 @@ class _StudentLearningHubScreenState
     );
   }
 
+  /// The large card that shows where the student is and does the stage's main
+  /// action when activated.
+  ///
+  /// For TalkBack it is one button whose [semanticLabel] says where the student
+  /// is, in listening order ("Science. Subject 1 of 3."), and whose
+  /// [onTapHint] says what a double tap does. The visual [body] (a lesson
+  /// excerpt) is deliberately NOT part of it: TalkBack reading lesson text off
+  /// the card sounded exactly like the lesson playing while the card said it
+  /// was not, which is where the "it says paused but it's reading" confusion
+  /// came from. The gesture [hint] lines are visual only — under TalkBack the
+  /// custom gestures are off.
   Widget _stageCard({
     required IconData icon,
     required Color accent,
     required String title,
     required String subtitle,
     required String hint,
+    required String semanticLabel,
+    required String onTapHint,
     String? progress,
     String? actionLabel,
     String? body,
     VoidCallback? onTap,
   }) {
-    final semanticLabel = [
-      if (progress != null) progress,
-      title,
-      subtitle,
-      if (body != null) body,
-    ].join('. ');
-
-    return Semantics(
+    return AccessibilityFocusTarget(
+      request: _focusRequestFor(_FocusTarget.card),
+      child: Semantics(
       container: true,
       button: true,
       label: semanticLabel,
-      hint: actionLabel ?? hint,
+      onTapHint: onTapHint,
       onTap: onTap,
       excludeSemantics: true,
       child: Material(
@@ -2447,10 +2772,25 @@ class _StudentLearningHubScreenState
           ),
         ),
       ),
+      ),
     );
   }
 
   Widget _emptyState(String message, IconData icon) {
+    // Takes TalkBack's focus like a stage card would, so a stage with nothing
+    // in it is said out loud instead of leaving focus at the top of the screen.
+    return AccessibilityFocusTarget(
+      request: _focusRequestFor(_FocusTarget.card),
+      child: Semantics(
+        container: true,
+        label: message,
+        excludeSemantics: true,
+        child: _emptyStateBox(message, icon),
+      ),
+    );
+  }
+
+  Widget _emptyStateBox(String message, IconData icon) {
     return Center(
       child: Container(
         margin: const EdgeInsets.all(24),
@@ -2488,7 +2828,13 @@ class _StudentLearningHubScreenState
 
   Widget _buildSubjectsStage(List<Subject> subjects) {
     if (subjects.isEmpty) {
-      return _emptyState('No subjects available.', Icons.menu_book_rounded);
+      return _emptyState(
+        AccessibilityMode.of(context).screenReaderEnabled
+            ? 'No subjects yet. Use Join class in the controls to get your '
+                'teacher\'s lessons.'
+            : 'No subjects available.',
+        Icons.menu_book_rounded,
+      );
     }
 
     _subjectIndex = _subjectIndex.clamp(0, subjects.length - 1);
@@ -2503,6 +2849,9 @@ class _StudentLearningHubScreenState
       actionLabel: 'Double tap to open',
       hint:
           'Swipe right for next. Swipe left for previous. Double tap to open.',
+      semanticLabel:
+          '${subject.name}. Subject ${_subjectIndex + 1} of ${subjects.length}.',
+      onTapHint: 'open this subject',
       onTap: _onDoubleTap,
     );
   }
@@ -2531,6 +2880,9 @@ class _StudentLearningHubScreenState
       actionLabel: 'Double tap to open lesson',
       hint:
           'Swipe right for next. Swipe left for previous. Double tap to open.',
+      semanticLabel: '${topic.name}. Topic ${_topicIndex + 1} of '
+          '${topics.length} in ${subject.name}.',
+      onTapHint: 'open the lesson',
       onTap: _onDoubleTap,
     );
   }
@@ -2557,13 +2909,21 @@ class _StudentLearningHubScreenState
                   'No lesson available.', Icons.description_rounded);
             }
 
+            // Paused means a resume point exists for THIS lesson; the card
+            // says so instead of "Ready to play", so the state shown and
+            // spoken is the state the next double tap acts on.
+            final paused = !_lessonPlaying &&
+                _lessonStarted &&
+                _segmentsLessonId == lesson.id;
+            final status =
+                _lessonPlaying ? 'Playing' : (paused ? 'Paused' : 'Ready to play');
             return _stageCard(
               icon: _lessonPlaying
                   ? Icons.pause_circle_rounded
                   : Icons.play_circle_rounded,
               accent: const Color(0xFF7C3AED),
               title: topic.name,
-              subtitle: _lessonPlaying ? 'Playing' : 'Ready to play',
+              subtitle: status,
               body: lesson.rawText.length > 220
                   ? '${lesson.rawText.substring(0, 220)}...'
                   : lesson.rawText,
@@ -2571,6 +2931,10 @@ class _StudentLearningHubScreenState
                   _lessonPlaying ? 'Double tap to pause' : 'Double tap to play',
               hint:
                   'Swipe right for next topic. Swipe left for previous. Swipe up to replay. Swipe down for quiz.',
+              semanticLabel: '${topic.name} lesson. $status.',
+              onTapHint: _lessonPlaying
+                  ? 'pause'
+                  : (paused ? 'continue reading' : 'play the lesson'),
               onTap: _onDoubleTap,
             );
           },
@@ -2609,6 +2973,8 @@ class _StudentLearningHubScreenState
               subtitle: topic.name,
               actionLabel: 'Double tap to confirm',
               hint: 'Double tap to confirm. Swipe up to return.',
+              semanticLabel: 'Questions for ${topic.name}. Ready to start.',
+              onTapHint: 'start the questions',
               onTap: _onDoubleTap,
             );
           },
@@ -2678,12 +3044,12 @@ class _StudentLearningHubScreenState
   }
 
   /// Single-tap handler. When the microphone has been retired to sleep after
-  /// too many silent windows, a tap anywhere wakes it back up — giving the
-  /// student a reliable, zero-UI recovery that works even under TalkBack
-  /// (where TalkBack will fire the focused element's tap action, but a second
-  /// tap on the background GestureDetector still reaches here). In every other
-  /// state the tap is intentionally ignored so it doesn't accidentally override
-  /// double-tap or long-press interactions.
+  /// too many silent windows (or found unavailable), a tap anywhere wakes it
+  /// back up — a zero-UI recovery for voice-first mode. It does NOT work under
+  /// TalkBack, which uses a single tap to explore and never passes it on;
+  /// that is why the microphone never sleeps there (it only opens on Voice
+  /// command). In every other state the tap is intentionally ignored so it
+  /// doesn't accidentally override double-tap or long-press interactions.
   void _onTap() {
     if (_voiceSleeping) {
       _wakeVoiceFromSleep();
@@ -2810,6 +3176,8 @@ class _StudentLearningHubScreenState
   @override
   Widget build(BuildContext context) {
     final subjectsAsync = ref.watch(allSubjectsProvider);
+    final mode = AccessibilityMode.of(context);
+    final gestures = mode.customGesturesEnabled;
 
     return PopScope(
       canPop: false,
@@ -2829,6 +3197,7 @@ class _StudentLearningHubScreenState
           _announceCurrentState(force: true);
         } else if (_stage == LearningStage.lesson) {
           unawaited(_endVoiceSession());
+          _stopLessonAudio();
           setState(() => _stage = LearningStage.topics);
           _announceCurrentState(force: true);
         } else if (_stage == LearningStage.topics) {
@@ -2851,27 +3220,39 @@ class _StudentLearningHubScreenState
           onPointerMove: _onPointerMove,
           onPointerUp: _onPointerEnd,
           onPointerCancel: _onPointerEnd,
+          // The whole-screen gesture set is for voice-first mode. Under
+          // TalkBack it is switched off: TalkBack passes some of its own
+          // gestures through (a two-finger scroll arrives here as a one-finger
+          // drag), which used to turn ordinary TalkBack navigation into "next
+          // topic" or "start quiz". It is also kept out of the semantics tree
+          // in every mode — otherwise it is an invisible, unlabelled, tappable
+          // node covering the screen that TalkBack can land on.
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: _onTap,
-            onDoubleTap: _onDoubleTap,
-            onLongPress: _onLongPress,
-            onHorizontalDragEnd: (details) {
-              final velocity = details.primaryVelocity ?? 0;
-              if (velocity > 120) {
-                _onSwipeRight();
-              } else if (velocity < -120) {
-                _onSwipeLeft();
-              }
-            },
-            onVerticalDragEnd: (details) {
-              final velocity = details.primaryVelocity ?? 0;
-              if (velocity > 120) {
-                _onSwipeDown();
-              } else if (velocity < -120) {
-                _onSwipeUp();
-              }
-            },
+            excludeFromSemantics: true,
+            onTap: gestures ? _onTap : null,
+            onDoubleTap: gestures ? _onDoubleTap : null,
+            onLongPress: gestures ? _onLongPress : null,
+            onHorizontalDragEnd: gestures
+                ? (details) {
+                    final velocity = details.primaryVelocity ?? 0;
+                    if (velocity > 120) {
+                      _onSwipeRight();
+                    } else if (velocity < -120) {
+                      _onSwipeLeft();
+                    }
+                  }
+                : null,
+            onVerticalDragEnd: gestures
+                ? (details) {
+                    final velocity = details.primaryVelocity ?? 0;
+                    if (velocity > 120) {
+                      _onSwipeDown();
+                    } else if (velocity < -120) {
+                      _onSwipeUp();
+                    }
+                  }
+                : null,
             child: Container(
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
@@ -2905,31 +3286,51 @@ class _StudentLearningHubScreenState
                             ),
                           ),
                           const SizedBox(width: 12),
-                          const Expanded(
-                            child: Text(
-                              'Audio Learner',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w900,
-                                color: Color(0xFF123B7A),
+                          Expanded(
+                            child: Semantics(
+                              header: true,
+                              child: const Text(
+                                'Audio Learner',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w900,
+                                  color: Color(0xFF123B7A),
+                                ),
                               ),
                             ),
                           ),
                           if (_cloudSyncing) ...[
-                            const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                            Semantics(
+                              label: 'Getting new lessons',
+                              child: const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              ),
                             ),
                             const SizedBox(width: 10),
                           ],
-                          _buildProgressButton(),
-                          const SizedBox(width: 8),
-                          _buildJoinClassButton(),
-                          const SizedBox(width: 8),
-                          _buildSignOutButton(),
+                          _voiceStatusChip(),
+                          // Under TalkBack these same actions are at the end
+                          // of the controls panel. Here, first in the reading
+                          // order, they put "Sign out" between the student and
+                          // their lesson on every screen.
+                          ExcludeSemantics(
+                            excluding: mode.screenReaderEnabled,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _buildProgressButton(),
+                                const SizedBox(width: 8),
+                                _buildJoinClassButton(),
+                                const SizedBox(width: 8),
+                                _buildSignOutButton(),
+                              ],
+                            ),
+                          ),
                           const SizedBox(width: 8),
                           _stageChip(),
                         ],
@@ -2939,7 +3340,12 @@ class _StudentLearningHubScreenState
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
                         child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 220),
+                          // No cross-fade under TalkBack: during a fade the old
+                          // and new stage are both in the semantics tree, and
+                          // TalkBack can be handed the outgoing one.
+                          duration: mode.screenReaderEnabled
+                              ? Duration.zero
+                              : const Duration(milliseconds: 220),
                           // Keying on `_stage` (not the rebuilt subtree
                           // itself) means a provider invalidation that leaves
                           // the stage unchanged updates this subtree in place
@@ -2960,13 +3366,12 @@ class _StudentLearningHubScreenState
                     // student reaches by the standard swipe-to-next-item and
                     // activates with the standard double-tap they already use
                     // on every other app.
-                    if (AccessibilityMode.of(context).needsExplicitControls)
-                      _buildAccessibleControls(),
+                    if (mode.needsExplicitControls) _buildAccessibleControls(),
                     // The footer teaches the gesture set. Under a screen reader
                     // those gestures do not apply (TalkBack owns them) and the
                     // buttons above are self-describing, so the footer would be
                     // misleading clutter competing for scarce vertical space.
-                    if (!AccessibilityMode.of(context).needsExplicitControls)
+                    if (!mode.needsExplicitControls)
                       Padding(
                         padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
                         child: Container(
@@ -3037,40 +3442,17 @@ class _StudentLearningHubScreenState
   ///
   /// The set changes with the stage so the student is never offered an action
   /// that does nothing — a dead button is worse by ear than no button.
+  ///
+  /// The stage's main action lives on the card above (open, play, start) and,
+  /// in the quiz, on the answer and Next buttons in the card. It is not
+  /// repeated here: every duplicate is one more stop the student has to swipe
+  /// past and listen to. The exception is Pause in the lesson, which must be
+  /// within reach while the lesson is talking.
+  ///
+  /// Order: this stage's actions first, then voice, then the actions available
+  /// everywhere, with Sign out last so it is never reached by accident first.
   Widget _buildAccessibleControls() {
     final buttons = <Widget>[];
-
-    // Always available as the first button for screen-reader users:
-    // Speak any command ("next", "open", "play", "quiz", "slower", "faster", "answer two", "progress", etc.)
-    buttons.add(AccessibleActionButton(
-      label: 'Voice command',
-      hint:
-          'Double tap to speak a command, like next, previous, open, play, slower, quiz, or answer two',
-      icon: Icons.mic_rounded,
-      background: const Color(0xFF1A56DB),
-      onPressed: () {
-        _silentWindows = 0;
-        unawaited(_enterVoiceCommandMode());
-      },
-    ));
-
-    // Voice auto-listen toggle
-    buttons.add(AccessibleActionButton(
-      label: _voiceAutoListen ? 'Auto-listen: On' : 'Auto-listen: Off',
-      hint: _voiceAutoListen
-          ? 'Double tap to stop the microphone from auto-listening after announcements'
-          : 'Double tap to make the microphone auto-listen for commands after announcements',
-      icon: _voiceAutoListen
-          ? Icons.record_voice_over_rounded
-          : Icons.voice_over_off_rounded,
-      background: _voiceAutoListen
-          ? const Color(0xFF16A34A)
-          : const Color(0xFF475569),
-      onPressed: () {
-        _silentWindows = 0;
-        unawaited(_toggleVoiceAutoListen());
-      },
-    ));
 
     void add(String label, String hint, IconData icon, VoidCallback action) {
       buttons.add(AccessibleActionButton(
@@ -3086,103 +3468,114 @@ class _StudentLearningHubScreenState
 
     switch (_stage) {
       case LearningStage.subjects:
-        add('Join class', 'Enter your teacher code to receive subjects',
-            Icons.group_add_rounded, _openJoinClassFlow);
-        add('Previous subject', 'Moves back one subject',
+        add('Previous subject', 'move to the previous subject',
             Icons.chevron_left_rounded, _onSwipeLeft);
-        add('Next subject', 'Moves forward one subject',
+        add('Next subject', 'move to the next subject',
             Icons.chevron_right_rounded, _onSwipeRight);
-        add('Open subject', 'Opens the subject you are on',
-            Icons.folder_open_rounded, _onDoubleTap);
         break;
       case LearningStage.topics:
-        add('Previous topic', 'Moves back one topic',
+        add('Previous topic', 'move to the previous topic',
             Icons.chevron_left_rounded, _onSwipeLeft);
-        add('Next topic', 'Moves forward one topic',
+        add('Next topic', 'move to the next topic',
             Icons.chevron_right_rounded, _onSwipeRight);
-        add('Open topic', 'Opens the lesson for this topic',
-            Icons.menu_book_rounded, _onDoubleTap);
         break;
       case LearningStage.lesson:
         add(
             _lessonPlaying ? 'Pause lesson' : 'Play lesson',
-            _lessonPlaying ? 'Stops reading' : 'Reads the lesson aloud',
+            _lessonPlaying ? 'stop reading' : 'read the lesson aloud',
             _lessonPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
             _toggleLessonPlayback);
         add(
             'Read slower',
-            'Lowers the reading speed',
+            'lower the reading speed',
             Icons.slow_motion_video_rounded,
             () => unawaited(_changeSpeechRate(slower: true)));
-        add('Read faster', 'Raises the reading speed', Icons.speed_rounded,
+        add('Read faster', 'raise the reading speed', Icons.speed_rounded,
             () => unawaited(_changeSpeechRate(slower: false)));
-        add('Repeat lesson', 'Reads this lesson again from the start',
+        add('Start again', 'read this lesson from the beginning',
             Icons.replay_rounded, _onSwipeUp);
-        add('Ask a question', 'Ask about this lesson using your voice',
+        add('Ask a question', 'ask about this lesson with your voice',
             Icons.help_outline_rounded, () => unawaited(_enterAskMode()));
-        add('Go to questions', 'Starts the quiz for this lesson',
+        add('Go to questions', 'start the questions for this lesson',
             Icons.quiz_rounded, _onSwipeDown);
         break;
       case LearningStage.quizConfirm:
-        add('Start questions', 'Begins the quiz', Icons.play_arrow_rounded,
-            _onDoubleTap);
-        add('Back to lesson', 'Returns to the lesson', Icons.arrow_back_rounded,
+        add('Back to lesson', 'return to the lesson', Icons.arrow_back_rounded,
             _onSwipeUp);
         break;
       case LearningStage.quiz:
-        final quizQ = _currentQuizQuestion();
-        final quizOpts = quizQ != null ? _quizOptions(quizQ) : <_QuizOption>[];
-        if (!_quizAnswered && !_quizComplete) {
-          for (var i = 0; i < quizOpts.length; i++) {
-            final opt = quizOpts[i];
-            final isCurrent = i == _answerIndex;
-            add(
-              'Option ${opt.label}: ${opt.text}',
-              'Double tap to choose Option ${opt.label}',
-              isCurrent
-                  ? Icons.radio_button_checked_rounded
-                  : Icons.radio_button_unchecked_rounded,
-              () => unawaited(_selectQuizOption(i)),
-            );
-          }
-        } else {
-          final isLast = _questionIndex >= _questionsCount() - 1;
-          add(
-            isLast ? 'Finish quiz' : 'Next question',
-            isLast
-                ? 'Double tap to finish quiz and return to lesson'
-                : 'Double tap to go to the next question',
-            isLast ? Icons.check_circle_rounded : Icons.arrow_forward_rounded,
-            _onDoubleTap,
-          );
-        }
-        add('Repeat question', 'Reads the question and options again',
-            Icons.replay_rounded, () => _announceCurrentState(force: true));
+        add('Repeat question', 'hear the question again', Icons.replay_rounded,
+            () => _requestFocus(_FocusTarget.question));
         break;
     }
 
+    // The label follows the recognizer itself, so "Stop listening" is shown
+    // exactly while the microphone is open — never a guess.
+    buttons.add(ValueListenableBuilder<bool>(
+      valueListenable: _stt.listening,
+      builder: (context, listening, _) => AccessibleActionButton(
+        label: listening ? 'Stop listening' : 'Voice command',
+        hint: listening
+            ? 'stop listening'
+            : 'speak a command after the tone, like next, play, or answer two',
+        icon: listening ? Icons.mic_off_rounded : Icons.mic_rounded,
+        background: listening
+            ? const Color(0xFF16A34A)
+            : const Color(0xFF1A56DB),
+        onPressed: () => unawaited(_enterVoiceCommandMode()),
+      ),
+    ));
+
     // Available from anywhere.
-    add('My progress', 'Hear how much you have completed',
+    add('My progress', 'hear how much you have finished',
         Icons.insights_rounded, _openProgress);
-    add('Sign out', 'Return to student login and choose a different student',
-        Icons.logout_rounded, () => unawaited(_signOutAndLeave()));
+    add('Join class', 'join your class with a class code',
+        Icons.group_add_rounded, _openJoinClassFlow);
+    add('Sign out', 'switch to a different student', Icons.logout_rounded,
+        () => unawaited(_signOutAndLeave()));
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-      child: Semantics(
-        container: true,
-        label: 'Learning controls',
-        // Capped and scrollable so the panel can never starve the lesson card
-        // above it. The lesson stage offers seven controls, which wrap onto
-        // several rows on a narrow phone — unbounded, that pushed the card
-        // into an overflow. TalkBack scrolls a focused button into view by
-        // itself, so nothing here becomes unreachable by being off-screen.
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 220),
-          child: SingleChildScrollView(
-            child: Wrap(spacing: 10, runSpacing: 10, children: buttons),
-          ),
+      // Capped and scrollable so the panel can never starve the lesson card
+      // above it. The lesson stage offers several controls, which wrap onto
+      // several rows on a narrow phone — unbounded, that pushed the card
+      // into an overflow. TalkBack scrolls a focused button into view by
+      // itself, so nothing here becomes unreachable by being off-screen.
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 220),
+        child: SingleChildScrollView(
+          child: Wrap(spacing: 10, runSpacing: 10, children: buttons),
         ),
+      ),
+    );
+  }
+
+  /// Visual microphone state for sighted helpers (TalkBack users get it from
+  /// the Voice command button's label). Bound to the recognizer, so it never
+  /// says "listening" while the engine is idle.
+  Widget _voiceStatusChip() {
+    return ExcludeSemantics(
+      child: ValueListenableBuilder<bool>(
+        valueListenable: _stt.listening,
+        builder: (context, listening, _) {
+          final (IconData icon, Color color, String? text) = listening
+              ? (Icons.mic_rounded, const Color(0xFF16A34A), 'Listening')
+              : _voiceUnavailable != null
+                  ? (Icons.mic_off_rounded, const Color(0xFFDC2626),
+                      'Voice off')
+                  : _voiceSleeping
+                      ? (Icons.mic_none_rounded, const Color(0xFF64748B),
+                          'Tap to speak')
+                      : (Icons.mic_none_rounded, const Color(0xFF64748B), null);
+          if (text == null) return const SizedBox.shrink();
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Tooltip(
+              message: text,
+              child: Icon(icon, color: color, size: 22),
+            ),
+          );
+        },
       ),
     );
   }
@@ -3418,6 +3811,14 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
   int _session = 0;
   final TextEditingController _codeController = TextEditingController();
 
+  /// Under TalkBack, the listening step of the current capture, waiting for
+  /// the student to activate "Speak now". The microphone is never opened on a
+  /// timer after an announcement there: nothing tells the app when TalkBack
+  /// has finished reading the prompt, and the old fixed wait opened the
+  /// microphone while TalkBack was still reading it — so the "class code"
+  /// heard was TalkBack's own voice.
+  Future<void> Function()? _pendingListen;
+
   // Captured while `ref` is valid — never touch `ref` in dispose().
   late final SttService _stt;
 
@@ -3434,6 +3835,18 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
     _stt.stopListening();
     super.dispose();
   }
+
+  /// How to confirm or redo what was heard, in the current mode's terms.
+  static String get _confirmHint => AccessibilityMode.isScreenReaderActive
+      ? 'If that is right, double tap Yes. To try again, double tap Say it '
+          'again.'
+      : 'Tap once if that is right. Tap twice to say it again.';
+
+  /// "Tap anywhere" for voice-first mode; the named button under TalkBack.
+  /// Starts a sentence.
+  static String _tapOr(String button) => AccessibilityMode.isScreenReaderActive
+      ? 'Double tap $button'
+      : 'Tap anywhere';
 
   Future<void> _say(String text) async {
     if (!mounted) return;
@@ -3472,9 +3885,12 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
       setState(() {
         _stage = _JoinStage.error;
         _statusText =
-            'Voice recognition is unavailable on this device. Ask your '
-            'teacher to link your class from their dashboard instead.';
+            'Voice recognition is unavailable on this device. A helper can '
+            'type the four characters of your class code below instead.';
       });
+      if (AccessibilityMode.isScreenReaderActive) {
+        AccessibilityMode.announce(_statusText);
+      }
       return;
     }
 
@@ -3509,61 +3925,116 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
     final session = ++_session;
     final tts = ref.read(ttsServiceProvider);
     final stt = ref.read(sttServiceProvider);
+    final screenReader = AccessibilityMode.isScreenReaderActive;
+
+    Future<void> listen() async {
+      if (!mounted || session != _session) return;
+      setState(() => _pendingListen = null);
+      // Our own prompt must have finished — by the engine's completion
+      // signal — before the microphone opens.
+      await tts.whenIdle().timeout(const Duration(seconds: 20), onTimeout: () {});
+      if (!mounted || session != _session) return;
+      if (screenReader) {
+        try {
+          await HapticFeedback.mediumImpact();
+          await SystemSound.play(SystemSoundType.click);
+        } catch (_) {}
+      } else {
+        // Settle gap: let the prompt's audio tail drain before the mic opens,
+        // so the recogniser doesn't transcribe our own example ("S C, 4 2 7
+        // 1") as the student's answer.
+        await Future<void>.delayed(const Duration(milliseconds: 450));
+      }
+      if (!mounted || session != _session) return;
+
+      var handled = false;
+      var longestPartial = '';
+      setState(() => _statusText = 'Listening… speak now.');
+
+      void unclear() {
+        if (handled || session != _session) return;
+        handled = true;
+        unawaited(onUnclear());
+      }
+
+      final started = await stt.startListening(
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 10),
+        // Many Android recognizers end a session WITHOUT a final result and
+        // send only partials. Without this fallback, every capture attempt on
+        // such devices ended in "I didn't catch that" forever — field test:
+        // a student could never join a class by voice.
+        onPartial: (words) {
+          final partial = words.trim();
+          if (partial.length > longestPartial.length) {
+            longestPartial = partial;
+          }
+        },
+        onResult: (words) {
+          if (handled || session != _session) return;
+          final trimmed = words.trim();
+          if (trimmed.isEmpty) return;
+          final recognized =
+              trimmed.length >= longestPartial.length ? trimmed : longestPartial;
+          handled = true;
+          unawaited(onHeard(recognized));
+        },
+        onDone: () {
+          if (handled || session != _session) return;
+          if (longestPartial.isNotEmpty) {
+            handled = true;
+            unawaited(onHeard(longestPartial));
+          } else {
+            unclear();
+          }
+        },
+        onError: (message) {
+          if (handled || session != _session) return;
+          if (longestPartial.isNotEmpty) {
+            handled = true;
+            unawaited(onHeard(longestPartial));
+            return;
+          }
+          // No internet or no permission will fail every time: say so and
+          // point at the typed code, instead of looping "I didn't catch that".
+          final failure = SttService.classifyError(message);
+          if (failure == VoiceFailure.noInternet ||
+              failure == VoiceFailure.permissionDenied) {
+            handled = true;
+            unawaited(_voiceUnavailable(failure));
+          } else {
+            unclear();
+          }
+        },
+      );
+      if (!started) unclear();
+    }
 
     setState(() => _stage = listeningStage);
-    if (AccessibilityMode.isScreenReaderActive) {
-      AccessibilityMode.announce(prompt);
-      await Future<void>.delayed(const Duration(milliseconds: 1400));
-    } else {
-      await tts.speakAndWait(prompt);
+    if (screenReader) {
+      // TalkBack reads the prompt; the student starts listening when ready.
+      setState(() => _pendingListen = listen);
+      await _say('$prompt When you are ready, double tap Speak now, then talk '
+          'after the tone.');
+      return;
     }
+    await tts.speakAndWait(prompt);
     if (!mounted || session != _session) return;
-    // Settle gap: let the prompt's audio tail drain before the mic opens, so
-    // the recogniser doesn't transcribe our own example ("S C, 4 2 7 1") as
-    // the student's answer.
-    await Future<void>.delayed(const Duration(milliseconds: 450));
-    if (!mounted || session != _session) return;
+    await listen();
+  }
 
-    var handled = false;
-    var longestPartial = '';
-    setState(() => _statusText = 'Listening… speak now.');
-
-    final started = stt.startListening(
-      listenFor: const Duration(seconds: 30),
-      pauseFor: const Duration(seconds: 10),
-      // Many Android recognizers end a session WITHOUT a final result and
-      // send only partials. Without this fallback, every capture attempt on
-      // such devices ended in "I didn't catch that" forever — field test:
-      // a student could never join a class by voice.
-      onPartial: (words) {
-        final partial = words.trim();
-        if (partial.length > longestPartial.length) {
-          longestPartial = partial;
-        }
-      },
-      onResult: (words) {
-        if (handled || session != _session) return;
-        final trimmed = words.trim();
-        if (trimmed.isEmpty) return;
-        final recognized =
-            trimmed.length >= longestPartial.length ? trimmed : longestPartial;
-        handled = true;
-        unawaited(onHeard(recognized));
-      },
-      onDone: () {
-        if (handled || session != _session) return;
-        handled = true;
-        if (longestPartial.isNotEmpty) {
-          unawaited(onHeard(longestPartial));
-        } else {
-          unawaited(onUnclear());
-        }
-      },
-    );
-    if (!started && !handled && session == _session) {
-      handled = true;
-      unawaited(onUnclear());
-    }
+  /// Voice capture cannot work right now; the typed code still can.
+  Future<void> _voiceUnavailable(VoiceFailure failure) async {
+    if (!mounted) return;
+    setState(() {
+      _stage = _JoinStage.error;
+      _pendingListen = null;
+    });
+    await _say(failure == VoiceFailure.noInternet
+        ? 'Joining a class needs the internet, and this phone is not '
+            'connected. Connect to the internet, then try again.'
+        : 'Audio Learner is not allowed to use the microphone. A helper can '
+            'type the four characters of the class code below instead.');
   }
 
   // ── Step 1: name ──────────────────────────────────────────────────────────
@@ -3580,9 +4051,7 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
           _spokenName = name;
           _stage = _JoinStage.confirmName;
         });
-        await _say(
-          'I heard $name. Tap once if that is right. Tap twice to say it again.',
-        );
+        await _say('I heard $name. $_confirmHint');
       },
       onUnclear: () async {
         if (!mounted) return;
@@ -3617,10 +4086,7 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
           _spokenCode = code;
           _stage = _JoinStage.confirmCode;
         });
-        await _say(
-          'I heard S C dash ${_spellOut(code)}. Tap once if that is right. '
-          'Tap twice to say it again.',
-        );
+        await _say('I heard S C dash ${_spellOut(code)}. $_confirmHint');
       },
       onUnclear: () async {
         if (!mounted) return;
@@ -3716,7 +4182,7 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
       await _say(
         'You\'re in! Your progress will now be saved to your class, and your '
         'teacher\'s lessons will start appearing in your subjects. '
-        'Tap anywhere to continue learning.',
+        '${_tapOr('Done')} to continue learning.',
       );
     } on BackendApiException catch (e) {
       if (!mounted) return;
@@ -3750,7 +4216,8 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
       _stage = _JoinStage.intro;
     });
     await _say(
-      'You\'ve left your class. Tap anywhere when you\'re ready to join a new one.',
+      'You\'ve left your class. ${_tapOr('Start')} when you\'re ready to '
+      'join a new one.',
     );
   }
 
@@ -3771,7 +4238,8 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
       if (!mounted) return;
       await _beginCodeCapture();
     } else {
-      await _say('Let\'s try again. Tap anywhere when you\'re ready to begin.');
+      await _say('Let\'s try again. ${_tapOr('Start')} when you\'re ready to '
+          'begin.');
     }
   }
 
@@ -3986,8 +4454,11 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
 
   @override
   Widget build(BuildContext context) {
+    // Tap-anywhere routing is for voice-first mode; TalkBack never passes a
+    // plain tap to the app, so every step also has a real button below.
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
+      excludeFromSemantics: true,
       onTap: _handleTap,
       onDoubleTap: _handleDoubleTap,
       child: AlertDialog(
@@ -4059,8 +4530,8 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
                           child: Semantics(
                             button: true,
                             label: 'Close keyboard',
-                            hint: 'Double tap to close keyboard',
                             onTap: () => FocusScope.of(context).unfocus(),
+                            excludeSemantics: true,
                             child: OutlinedButton.icon(
                               icon: const Icon(Icons.keyboard_hide_rounded, size: 18),
                               label: const Text('Close keyboard'),
@@ -4073,8 +4544,8 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
                           child: Semantics(
                             button: true,
                             label: 'Join with typed code',
-                            hint: 'Double tap to submit class code',
                             onTap: _useTypedCode,
+                            excludeSemantics: true,
                             child: ElevatedButton(
                               onPressed: _useTypedCode,
                               style: ElevatedButton.styleFrom(
@@ -4124,6 +4595,23 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
   }
 
   List<Widget> _buildActions(BuildContext context) {
+    Widget primary(String label, VoidCallback onPressed) => ElevatedButton(
+          onPressed: onPressed,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF1A56DB),
+            foregroundColor: Colors.white,
+          ),
+          child: Text(label),
+        );
+    final cancel = TextButton(
+      onPressed: () => Navigator.pop(context),
+      child: const Text('Cancel'),
+    );
+
+    // Every step the voice flow drives with "tap once / tap twice" also has a
+    // labelled button here: under TalkBack those taps never reach the app, and
+    // without these buttons a TalkBack user could hear "I heard S C dash 4 B 7
+    // K, tap once if that is right" with no way to say yes.
     switch (_stage) {
       case _JoinStage.alreadyLinked:
         return [
@@ -4138,26 +4626,33 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
           ),
         ];
       case _JoinStage.success:
-        return [
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1A56DB),
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Done'),
-          ),
-        ];
+        return [primary('Done', () => Navigator.pop(context))];
       case _JoinStage.loading:
       case _JoinStage.linking:
         return const [];
-      default:
+      case _JoinStage.intro:
+        return [cancel, primary('Start', _handleTap)];
+      case _JoinStage.askName:
+      case _JoinStage.askCode:
+        final pending = _pendingListen;
+        return [
+          cancel,
+          if (pending != null)
+            primary('Speak now', () => unawaited(pending()))
+          else
+            primary('Listen again', _handleTap),
+        ];
+      case _JoinStage.confirmName:
+      case _JoinStage.confirmCode:
         return [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            onPressed: _handleDoubleTap,
+            child: const Text('Say it again'),
           ),
+          primary('Yes, that\'s right', _handleTap),
         ];
+      case _JoinStage.error:
+        return [cancel, primary('Try again', _handleTap)];
     }
   }
 

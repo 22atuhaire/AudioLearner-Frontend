@@ -162,13 +162,23 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
 
   /// Voice has failed repeatedly. Say so once, and leave a way BACK to voice
   /// (tap anywhere) rather than stranding a blind pupil on a visual list.
-  Future<void> _giveUpToTapFallback() async {
+  /// [reason] names the cause when it is known, so the pupil (or a helper)
+  /// knows whether trying again can help.
+  Future<void> _giveUpToTapFallback([VoiceFailure? reason]) async {
     if (!mounted) return;
     setState(() => _voiceGaveUp = true);
     await _stt.stopListening();
+    final cause = switch (reason) {
+      VoiceFailure.noInternet =>
+        'Saying your name needs the internet, and this phone is not '
+            'connected.',
+      VoiceFailure.permissionDenied =>
+        'Audio Learner is not allowed to use the microphone.',
+      _ => 'I am having trouble hearing you.',
+    };
     await _tts.speakAndWait(
-      'I am having trouble hearing you. Tap anywhere on the screen to try '
-      'again with your voice, or tap new student to type a name.',
+      '$cause Tap anywhere on the screen to try again with your voice, or '
+      'tap new student to type a name.',
     );
   }
 
@@ -223,13 +233,13 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
   /// Windows are deliberately generous: pupils on a slow phone need a moment to
   /// react to the tone, and being cut off mid-name was a big part of why the
   /// prompt kept repeating.
-  void _listen(
+  Future<void> _listen(
     int session,
     void Function(String) onResult, {
     required Future<void> Function() onNothing,
     Duration listenFor = const Duration(seconds: 20),
     Duration pauseFor = const Duration(seconds: 6),
-  }) {
+  }) async {
     var handled = false;
     var lastPartial = '';
     void deliver(String words) {
@@ -239,7 +249,7 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
       onResult(_stripPromptEcho(words));
     }
 
-    final started = _stt.startListening(
+    final started = await _stt.startListening(
       listenFor: listenFor,
       pauseFor: pauseFor,
       // Many Android recognizers end a session WITHOUT a final result, sending
@@ -269,12 +279,20 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
       // An ENGINE failure is not the pupil's fault: don't treat it as a missed
       // answer. Anything already heard still counts; otherwise back off and try
       // the microphone again, and only surrender after several in a row.
-      onError: (_) {
+      onError: (message) {
         if (handled || session != _session) return;
         handled = true;
         if (lastPartial.isNotEmpty) {
           _recognizerErrors = 0;
           deliver(lastPartial);
+          return;
+        }
+        // No internet or no microphone permission fails identically every
+        // time; retrying only made the pupil wait through more prompts.
+        final failure = SttService.classifyError(message);
+        if (failure == VoiceFailure.noInternet ||
+            failure == VoiceFailure.permissionDenied) {
+          unawaited(_giveUpToTapFallback(failure));
           return;
         }
         _recognizerErrors++;
@@ -289,7 +307,8 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
 
     // The engine refused to start (busy or unavailable) — no callback will ever
     // arrive, so recover here instead of leaving the pupil in silence.
-    if (!started && mounted && session == _session) {
+    if (!started && !handled && mounted && session == _session) {
+      handled = true;
       _recognizerErrors++;
       if (_recognizerErrors >= _maxRecognizerErrors) {
         unawaited(_giveUpToTapFallback());
@@ -547,6 +566,8 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
                   Semantics(
                     button: true,
                     label: 'Try voice again',
+                    onTap: () => unawaited(_restartVoice()),
+                    excludeSemantics: true,
                     child: OutlinedButton.icon(
                       icon: const Icon(Icons.mic_rounded),
                       label: const Text('Try voice again'),
@@ -579,8 +600,9 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
                   Semantics(
                     button: true,
                     label: 'Start learning',
-                    hint: 'Double tap to save name and start learning',
+                    onTapHint: 'save the name and start learning',
                     onTap: _submitTypedName,
+                    excludeSemantics: true,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         minimumSize: const Size.fromHeight(56),
@@ -598,8 +620,8 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
                   Semantics(
                     button: true,
                     label: 'Close keyboard',
-                    hint: 'Double tap to dismiss keyboard',
                     onTap: () => FocusScope.of(context).unfocus(),
+                    excludeSemantics: true,
                     child: TextButton.icon(
                       style: TextButton.styleFrom(
                         minimumSize: const Size.fromHeight(48),
@@ -613,8 +635,8 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
                   const SizedBox(height: 6),
                   Semantics(
                     button: true,
-                    label: 'Cancel and back to student list',
-                    hint: 'Double tap to cancel and return to student list',
+                    label: 'Back to student list',
+                    excludeSemantics: true,
                     onTap: () {
                       FocusScope.of(context).unfocus();
                       setState(() => _addingNew = false);
@@ -639,7 +661,10 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
                             padding: const EdgeInsets.symmetric(vertical: 6),
                             child: Semantics(
                               button: true,
-                              label: 'Continue as ${s.name}',
+                              label: s.name,
+                              onTapHint: 'continue as ${s.name}',
+                              onTap: () => _login(s),
+                              excludeSemantics: true,
                               child: ElevatedButton(
                                 style: ElevatedButton.styleFrom(
                                   padding: const EdgeInsets.all(20),
@@ -656,8 +681,9 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
                   Semantics(
                     button: true,
                     label: 'New student',
-                    hint: 'Double tap to add a new student name',
+                    onTapHint: 'type a new student name',
                     onTap: () => setState(() => _addingNew = true),
+                    excludeSemantics: true,
                     child: OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
                         minimumSize: const Size.fromHeight(56),
