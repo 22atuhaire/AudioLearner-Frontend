@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:audioapp/features/student/student_login_screen.dart'
+    show kActiveStudentIdKey;
 import 'package:audioapp/shared/services/accessibility_service.dart';
 import 'package:audioapp/shared/services/progress_summary_service.dart';
 import 'package:audioapp/shared/services/providers.dart';
@@ -8,6 +10,7 @@ import 'package:audioapp/shared/services/tts_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// Voice-first "My Progress" screen.
 ///
@@ -29,6 +32,11 @@ class StudentProgressScreen extends ConsumerStatefulWidget {
 class _StudentProgressScreenState extends ConsumerState<StudentProgressScreen> {
   ProgressSummary? _summary;
   bool _loading = true;
+
+  // Under TalkBack the summary is not announced in one long breath: focus
+  // moves to the overall card (see build) and the student swipes through the
+  // rest at their own pace.
+  int? _focusRequest;
 
   // Bounded listen loop so the student can leave by voice. Without this, a
   // blind student who opened progress (especially with nothing to report) hit a
@@ -67,13 +75,18 @@ class _StudentProgressScreenState extends ConsumerState<StudentProgressScreen> {
     try {
       await ref.read(ttsInitProvider.future);
       final db = ref.read(appDatabaseProvider);
-      final student = await db.studentDao.getStudent();
+      // The signed-in student, not simply the first one on the phone: on a
+      // shared phone the first row is someone else.
+      final prefs = await SharedPreferences.getInstance();
+      final activeId = prefs.getInt(kActiveStudentIdKey);
+      final student = (activeId == null
+              ? null
+              : await db.studentDao.getStudentById(activeId)) ??
+          await db.studentDao.getStudent();
       if (student == null) {
         if (!mounted) return;
         setState(() => _loading = false);
-        await _sayThenListen(
-          'No student profile found on this device yet.$_navHint',
-        );
+        await _sayThenListen('No student profile found on this device yet.');
         return;
       }
 
@@ -86,18 +99,25 @@ class _StudentProgressScreenState extends ConsumerState<StudentProgressScreen> {
         _loading = false;
       });
 
-      await _sayThenListen(buildSpokenProgressSummary(summary) + _navHint);
+      if (AccessibilityMode.isScreenReaderActive) {
+        setState(() => _focusRequest = AccessibilityFocusTarget.newRequest());
+        return;
+      }
+      await _sayThenListen(buildSpokenProgressSummary(summary));
     } catch (_) {
       if (!mounted) return;
       setState(() => _loading = false);
       await _sayThenListen(
-        'Sorry, your progress could not be loaded right now.$_navHint',
-      );
+          'Sorry, your progress could not be loaded right now.');
     }
   }
 
-  /// Speaks [text], then opens a bounded listening window for "back" / "repeat"
-  /// so the student is never trapped on this screen.
+  /// Speaks [text] and how to leave, then opens a bounded listening window
+  /// for "back" / "repeat" so the student is never trapped on this screen.
+  ///
+  /// Under TalkBack only [text] is announced: the voice and double-tap-the-
+  /// screen instructions do not apply there, and the Back button is a normal
+  /// control TalkBack reaches.
   Future<void> _sayThenListen(String text) async {
     if (AccessibilityMode.isScreenReaderActive) {
       AccessibilityMode.announce(text);
@@ -106,17 +126,21 @@ class _StudentProgressScreenState extends ConsumerState<StudentProgressScreen> {
     final session = ++_listenSession;
     await ref.read(sttServiceProvider).stopListening();
     if (!mounted || session != _listenSession) return;
-    await ref.read(ttsServiceProvider).speakAndWait(text);
+    await ref.read(ttsServiceProvider).speakAndWait(text + _navHint);
     if (!mounted || session != _listenSession) return;
     _listenForCommand(session);
   }
 
-  void _listenForCommand(int session) async {
+  Future<void> _listenForCommand(int session) async {
     if (!mounted || session != _listenSession) return;
     final stt = ref.read(sttServiceProvider);
     final ready = await stt.initialize();
     if (!ready || !mounted || session != _listenSession) return;
 
+    // Our own speech must be finished (engine completion) before listening.
+    await _tts
+        .whenIdle()
+        .timeout(const Duration(seconds: 20), onTimeout: () {});
     await Future<void>.delayed(const Duration(milliseconds: 300));
     if (!mounted || session != _listenSession) return;
 
@@ -141,7 +165,7 @@ class _StudentProgressScreenState extends ConsumerState<StudentProgressScreen> {
       }
     }
 
-    stt.startListening(
+    await stt.startListening(
       onPartial: act,
       onResult: act,
       onDone: () {
@@ -167,8 +191,8 @@ class _StudentProgressScreenState extends ConsumerState<StudentProgressScreen> {
     _silentWindows = 0;
     final summary = _summary;
     final text = summary == null
-        ? 'There is no progress to show yet.$_navHint'
-        : buildSpokenProgressSummary(summary) + _navHint;
+        ? 'There is no progress to show yet.'
+        : buildSpokenProgressSummary(summary);
     unawaited(_sayThenListen(text));
   }
 
@@ -218,15 +242,19 @@ class _StudentProgressScreenState extends ConsumerState<StudentProgressScreen> {
         ),
         // Single tap replays the summary; double tap leaves — both work without
         // sight, alongside the spoken "back" command.
+        // (TalkBack never passes these taps on; there the Back button and
+        // the cards themselves are the interface.)
         body: GestureDetector(
           behavior: HitTestBehavior.opaque,
+          excludeFromSemantics: true,
           onTap: _replay,
           onDoubleTap: _goBack,
           child: _loading
               ? const Center(child: CircularProgressIndicator())
               : _summary == null
-                  ? _message('No progress to show yet.\n\n'
-                      'Double tap to go back.')
+                  ? _message(AccessibilityMode.of(context).screenReaderEnabled
+                      ? 'No progress to show yet.'
+                      : 'No progress to show yet.\n\nDouble tap to go back.')
                   : _buildSummary(_summary!),
         ),
       ),
@@ -293,6 +321,23 @@ class _StudentProgressScreenState extends ConsumerState<StudentProgressScreen> {
 
   Widget _overallCard(ProgressSummary s) {
     final pct = s.overallCompletionPercent.round();
+    final acc = s.overallQuizAccuracyPercent;
+    // One TalkBack stop for the whole card, read as a sentence, instead of
+    // four fragments ("Overall completion", "43%", ...).
+    return AccessibilityFocusTarget(
+      request: _focusRequest,
+      child: Semantics(
+        container: true,
+        label: 'Overall, ${s.completedLessons} of ${s.totalLessons} '
+            'lesson${s.totalLessons == 1 ? '' : 's'} finished, $pct percent.'
+            '${acc != null ? ' Quiz score ${acc.round()} percent.' : ''}',
+        excludeSemantics: true,
+        child: _overallCardBox(s, pct),
+      ),
+    );
+  }
+
+  Widget _overallCardBox(ProgressSummary s, int pct) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -375,65 +420,74 @@ class _StudentProgressScreenState extends ConsumerState<StudentProgressScreen> {
 
   Widget _subjectCard(SubjectProgress subj) {
     final pct = subj.completionPercent.round();
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  subj.subjectName,
-                  style: const TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF123B7A),
+    final acc = subj.quizAccuracyPercent;
+    return Semantics(
+      container: true,
+      label: '${subj.subjectName}. ${subj.completedLessons} of '
+          '${subj.totalLessons} lesson${subj.totalLessons == 1 ? '' : 's'} '
+          'finished, $pct percent.'
+          '${acc != null ? ' Quiz score ${acc.round()} percent.' : ''}',
+      excludeSemantics: true,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Text(
+                    subj.subjectName,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF123B7A),
+                    ),
                   ),
                 ),
-              ),
-              Text(
-                '$pct%',
-                style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w900,
-                  color: Color(0xFF1A56DB),
+                Text(
+                  '$pct%',
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFF1A56DB),
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: LinearProgressIndicator(
-              value: subj.totalLessons == 0 ? 0 : pct / 100,
-              minHeight: 10,
-              backgroundColor: const Color(0xFFE5EAF5),
-              valueColor:
-                  const AlwaysStoppedAnimation<Color>(Color(0xFF16A34A)),
+              ],
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '${subj.completedLessons} of ${subj.totalLessons} '
-            'lesson${subj.totalLessons == 1 ? '' : 's'}'
-            '${subj.quizAccuracyPercent != null ? '  •  Quiz ${subj.quizAccuracyPercent!.round()}%' : ''}',
-            style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
-          ),
-        ],
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: LinearProgressIndicator(
+                value: subj.totalLessons == 0 ? 0 : pct / 100,
+                minHeight: 10,
+                backgroundColor: const Color(0xFFE5EAF5),
+                valueColor:
+                    const AlwaysStoppedAnimation<Color>(Color(0xFF16A34A)),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${subj.completedLessons} of ${subj.totalLessons} '
+              'lesson${subj.totalLessons == 1 ? '' : 's'}'
+              '${subj.quizAccuracyPercent != null ? '  •  Quiz ${subj.quizAccuracyPercent!.round()}%' : ''}',
+              style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+            ),
+          ],
+        ),
       ),
     );
   }
