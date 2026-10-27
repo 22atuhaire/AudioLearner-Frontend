@@ -155,7 +155,19 @@ class QuizResultsTable extends Table {
   ],
 )
 class AppDatabase extends _$AppDatabase {
-  AppDatabase() : super(driftDatabase(name: 'audioapp'));
+  AppDatabase()
+      : super(driftDatabase(
+          name: 'audioapp',
+          // Browser builds only. Drift runs SQLite as WebAssembly in a worker;
+          // both files live in web/ and must match the drift and sqlite3
+          // versions in pubspec.lock (re-download them after upgrading).
+          // Without this the database never opens in Chrome and the login
+          // screen waits for the student list forever.
+          web: DriftWebOptions(
+            sqlite3Wasm: Uri.parse('sqlite3.wasm'),
+            driftWorker: Uri.parse('drift_worker.js'),
+          ),
+        ));
 
   @override
   int get schemaVersion => 1;
