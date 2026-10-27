@@ -1,11 +1,11 @@
 note_id,title,subject,grade,source,generated,valid,invalid,precision,expected_concepts,covered,missed,recall
 01_number_operations_p6_math,"Higher Number Operations",Mathematics,P.6,real,4,4,0,1.0000,5,3,2,0.6000
 02_living_things_p3_science,"Living and Non-Living Things",Science,P.3,real,1,1,0,1.0000,5,0,5,0.0000
-03_food_nutrition_p4_science,"Food and Nutrition",Science,P.4,real,5,4,1,0.8000,5,1,4,0.2000
+03_food_nutrition_p4_science,"Food and Nutrition",Science,P.4,real,5,2,3,0.4000,5,1,4,0.2000
 04_water_p5_science,"Water",Science,P.5,authored,8,7,1,0.8750,5,2,3,0.4000
 05_digestive_system_p6_science,"The Digestive System",Science,P.6,authored,7,7,0,1.0000,5,3,2,0.6000
 06_weather_climate_p5_sst,"Weather and Climate",Social Studies,P.5,authored,7,7,0,1.0000,5,3,2,0.6000
-07_physical_features_p5_sst,"Physical Features of Uganda",Social Studies,P.5,authored,7,7,0,1.0000,5,2,3,0.4000
+07_physical_features_p5_sst,"Physical Features of Uganda",Social Studies,P.5,authored,7,6,1,0.8571,5,2,3,0.4000
 08_fractions_p5_math,"Fractions",Mathematics,P.5,authored,5,5,0,1.0000,5,4,1,0.8000
 09_parts_of_speech_p6_english,"Parts of Speech",English,P.6,authored,6,6,0,1.0000,5,3,2,0.6000
 10_hygiene_disease_p4_health,"Personal Hygiene and Disease Prevention",Health Education,P.4,authored,6,6,0,1.0000,5,4,1,0.8000

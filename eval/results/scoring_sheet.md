@@ -466,7 +466,7 @@ A question is **valid** when all of these hold:
 - Explanation: From your lesson: The highest peak of Mount Rwenzori is called Margherita.
 - **Verdict (`07_physical_features_p5_sst,3`): ______**
 
-**4. Which extinct volcano found in the east of Uganda?**
+**4. Which extinct volcano is found in the east of Uganda?**
 
 - A. A lake
 - B. Lake Albert
