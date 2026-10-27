@@ -77,12 +77,12 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
   }
 
   Future<void> _bootstrap() async {
-    await ref.read(ttsInitProvider.future);
     final db = ref.read(appDatabaseProvider);
     final students = await db.studentDao.getAllStudents();
-    final stt = ref.read(sttServiceProvider);
-    final ready = await stt.initialize();
     if (!mounted) return;
+    // Show the names first. They are the whole interface under TalkBack, and
+    // speech setup below can wait on the microphone permission dialog — it
+    // used to keep every button behind a loading spinner until then.
     setState(() {
       _students = students;
       _loading = false;
@@ -95,6 +95,9 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
       return;
     }
 
+    await ref.read(ttsInitProvider.future);
+    final ready = await ref.read(sttServiceProvider).initialize();
+    if (!mounted) return;
     if (!ready) {
       await ref.read(ttsServiceProvider).speak(
             'Voice is not available. Tap your name on the screen, '

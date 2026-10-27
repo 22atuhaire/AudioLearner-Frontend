@@ -173,9 +173,22 @@ class _StudentProgressScreenState extends ConsumerState<StudentProgressScreen> {
         handled = true;
         _silentWindows++;
         if (_silentWindows >= _maxSilentWindows) return; // go quiet
+        // Under TalkBack the microphone opens once per press, never again on
+        // its own: it would otherwise run in the background while the
+        // student uses TalkBack.
+        if (AccessibilityMode.isScreenReaderActive) return;
         _listenForCommand(session);
       },
     );
+  }
+
+  /// A repeat press while already listening is ignored: restarting would
+  /// close the open window and leave the new one refused by the busy
+  /// recognizer — so the student heard nothing at all.
+  void _onVoicePressed() {
+    if (_stt.isListening) return;
+    _silentWindows = 0;
+    unawaited(_listenForCommand(++_listenSession));
   }
 
   void _goBack() {
@@ -224,18 +237,12 @@ class _StudentProgressScreenState extends ConsumerState<StudentProgressScreen> {
               button: true,
               label: 'Voice command',
               hint: 'Double tap to speak a command like back or repeat',
-              onTap: () {
-                _silentWindows = 0;
-                _listenForCommand(++_listenSession);
-              },
+              onTap: _onVoicePressed,
               excludeSemantics: true,
               child: IconButton(
                 icon: const Icon(Icons.mic_rounded),
                 tooltip: 'Voice command. Double tap to speak.',
-                onPressed: () {
-                  _silentWindows = 0;
-                  _listenForCommand(++_listenSession);
-                },
+                onPressed: _onVoicePressed,
               ),
             ),
           ],

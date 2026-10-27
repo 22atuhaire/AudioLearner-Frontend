@@ -106,14 +106,19 @@ class _FakePlatforms {
   }
 
   /// The recognizer reports an engine error, as Android does.
+  /// In the order Android delivers it: statuses first, then the error.
   Future<void> recognizerError(
-          TestDefaultBinaryMessenger messenger, String error) =>
-      messenger.handlePlatformMessage(
-        'plugin.csdcorp.com/speech_to_text',
-        const StandardMethodCodec().encodeMethodCall(MethodCall(
-            'notifyError', '{"errorMsg":"$error","permanent":true}')),
-        (_) {},
-      );
+      TestDefaultBinaryMessenger messenger, String error) async {
+    Future<void> send(MethodCall call) => messenger.handlePlatformMessage(
+          'plugin.csdcorp.com/speech_to_text',
+          const StandardMethodCodec().encodeMethodCall(call),
+          (_) {},
+        );
+    await send(const MethodCall('notifyStatus', 'notListening'));
+    await send(const MethodCall('notifyStatus', 'doneNoResult'));
+    await send(MethodCall(
+        'notifyError', '{"errorMsg":"$error","permanent":true}'));
+  }
 
   int get listens => stt.where((m) => m == 'listen').length;
 
@@ -278,6 +283,91 @@ void main() {
       await unmount(tester);
       semantics.dispose();
     });
+
+    // TalkBack double taps that land in quick succession — a student who
+    // heard nothing yet and tapped again — must not undo the first one.
+
+    testWidgets('a repeated Play while the lesson is starting keeps it playing',
+        (tester) async {
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(_app());
+      await settle(tester);
+      tester.semantics.tap(find.semantics.byLabel('Science. Subject 1 of 1.'));
+      await settle(tester);
+      tester.semantics
+          .tap(find.semantics.byLabel('Plants. Topic 1 of 1 in Science.'));
+      await settle(tester);
+
+      platforms.holdSpeech = Completer<int>();
+      final play = find.semantics.byLabel('Plants lesson. Ready to play.');
+      final node = play.evaluate().single;
+      // Two activations before the app has had a frame to respond.
+      node.owner!.performAction(node.id, SemanticsAction.tap);
+      node.owner!.performAction(node.id, SemanticsAction.tap);
+      await settle(tester);
+
+      expect(find.semantics.byLabel('Plants lesson. Playing.'), findsOne);
+      expect(platforms.tts.where((m) => m == 'speak').length, 1);
+
+      await unmount(tester);
+      semantics.dispose();
+    });
+
+    testWidgets('only the first of two rapid answer activations counts',
+        (tester) async {
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(_app());
+      await settle(tester);
+      tester.semantics.tap(find.semantics.byLabel('Science. Subject 1 of 1.'));
+      await settle(tester);
+      tester.semantics
+          .tap(find.semantics.byLabel('Plants. Topic 1 of 1 in Science.'));
+      await settle(tester);
+      tester.semantics.tap(find.semantics.byLabel('Go to questions'));
+      await settle(tester);
+      tester.semantics
+          .tap(find.semantics.byLabel('Questions for Plants. Ready to start.'));
+      await settle(tester);
+
+      final two = find.semantics.byLabel('Option 2: Sand').evaluate().single;
+      final three = find.semantics.byLabel('Option 3: Salt').evaluate().single;
+      two.owner!.performAction(two.id, SemanticsAction.tap);
+      three.owner!.performAction(three.id, SemanticsAction.tap);
+      await settle(tester);
+
+      expect(find.semantics.byLabel(RegExp(r'^You chose option 2\.')), findsOne);
+      // Still on question 1: the second activation did not answer anything.
+      expect(find.semantics.byLabel(RegExp(r'^Question 1 of 2')), findsOne);
+
+      await unmount(tester);
+      semantics.dispose();
+    });
+
+    testWidgets('a repeated Voice command while the mic opens opens it once',
+        (tester) async {
+      final semantics = tester.ensureSemantics();
+      await tester.pumpWidget(_app());
+      await settle(tester);
+
+      final voice = find.semantics.byLabel('Voice command').evaluate().single;
+      voice.owner!.performAction(voice.id, SemanticsAction.tap);
+      // The second double tap lands while the microphone is still opening
+      // (during the tone), not yet listening.
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(platforms.listens, 0);
+      platforms.stt.clear();
+      voice.owner!.performAction(voice.id, SemanticsAction.tap);
+      await settle(tester);
+
+      // It was not torn down and restarted (no stop), and opened once.
+      expect(platforms.stt, ['listen']);
+      expect(platforms.listens, 1);
+      // The button reflects the open microphone, so the student can stop it.
+      expect(find.semantics.byLabel('Stop listening'), findsOne);
+
+      await unmount(tester);
+      semantics.dispose();
+    });
   });
 
   testWidgets(
@@ -313,19 +403,24 @@ void main() {
     await settle(tester);
     expect(platforms.listens, 1);
 
+    // No connection: the network recognizer fails, the service tries the
+    // offline route in the same window, and that fails too (no offline pack).
+    await platforms.recognizerError(messenger, 'error_network');
+    await settle(tester);
+    expect(platforms.listens, 2, reason: 'the offline route was tried');
     await platforms.recognizerError(messenger, 'error_network');
     await settle(tester);
     expect(platforms.spoken.last, contains('need the internet'));
 
     // Retrying cannot help, so the automatic loop does not keep chiming.
     await tester.pump(const Duration(seconds: 5));
-    expect(platforms.listens, 1);
+    expect(platforms.listens, 2);
 
     // "Tap the screen once to try voice again" — and it does.
     await tester.tap(find.textContaining('chart icon'));
     await tester.pump(const Duration(milliseconds: 400));
     await settle(tester);
-    expect(platforms.listens, 2);
+    expect(platforms.listens, 3);
 
     await unmount(tester);
   });

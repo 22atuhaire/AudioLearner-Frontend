@@ -12,6 +12,7 @@ import 'package:audioapp/shared/services/stt_service.dart';
 import 'package:audioapp/shared/services/tts_service.dart';
 import 'package:audioapp/shared/services/voice_command_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -81,6 +82,19 @@ class _StudentLearningHubScreenState
   // The loaded lesson has been started and not yet heard to the end, so the
   // next play continues it: the card says "Paused", not "Ready to play".
   bool _lessonStarted = false;
+
+  // Between a play activation and the first words being handed to the TTS
+  // engine. A second double tap in this window used to count as "pause": the
+  // student, hearing nothing yet, tapped again — and switched the lesson
+  // straight back off, then had to tap again, and again. While starting, a
+  // repeated play/pause is ignored; once audio is on its way, pause works.
+  bool _playbackStarting = false;
+
+  // Segment length the loaded segments were built for (see _segmentTarget),
+  // and the in-flight preparation, so a lesson is split once, when it opens.
+  int? _segmentsTarget;
+  Future<List<LessonSegment>>? _segmentsPending;
+  int? _segmentsPendingKey;
   bool _quizAnswered = false;
   bool _quizComplete = false;
   String? _announcementKey;
@@ -135,6 +149,13 @@ class _StudentLearningHubScreenState
   // the request token that makes it happen exactly once.
   _FocusTarget? _focusTarget;
   int? _focusRequest;
+
+  // True while a push-to-talk request is opening the microphone (see
+  // _enterVoiceCommandMode).
+  bool _voiceStarting = false;
+
+  // True while an "Ask a question" window is open.
+  bool _askListening = false;
 
   // ── Echo guard ──────────────────────────────────────────────────────────
   // On a hands-free phone the microphone hears the app's own spoken prompt
@@ -503,6 +524,7 @@ class _StudentLearningHubScreenState
   /// app speech follows to cut it off — left the lesson talking on another
   /// screen.
   void _stopLessonAudio() {
+    _playbackStarting = false;
     if (!_lessonPlaying) return;
     setState(() => _lessonPlaying = false);
     unawaited(_tts.stop());
@@ -544,6 +566,11 @@ class _StudentLearningHubScreenState
   /// opens. Activating it while listening stops listening.
   Future<void> _enterVoiceCommandMode() async {
     if (!mounted) return;
+    // A repeat activation while the microphone is still being opened. It used
+    // to fall through to "stop listening" as soon as the recognizer was half
+    // started, so a student who tapped twice because nothing had happened yet
+    // cancelled their own request. Ignore it; the tone follows shortly.
+    if (_voiceStarting) return;
     final stt = ref.read(sttServiceProvider);
     if (stt.isListening) {
       _voiceLoopSession++;
@@ -555,24 +582,29 @@ class _StudentLearningHubScreenState
     final session = ++_voiceLoopSession;
     _silentWindows = 0;
     _busyRetries = 0;
-    await stt.stopListening();
-    // The microphone must not hear the lesson.
-    _stopLessonAudio();
-    await ref.read(ttsServiceProvider).stop();
-    if (!mounted || session != _voiceLoopSession) return;
-
-    // Under TalkBack there is no spoken prompt: the student just activated a
-    // button labelled "Voice command", and anything announced now would be
-    // spoken by TalkBack while the microphone opens — and transcribed. The
-    // tone is the prompt.
-    if (!_screenReaderOn) {
-      const prompt = 'Say your command after the tone.';
-      await ref.read(ttsServiceProvider).speakAndWait(prompt);
-      _noteSpoke(prompt);
+    _voiceStarting = true;
+    try {
+      await stt.stopListening();
+      // The microphone must not hear the lesson.
+      _stopLessonAudio();
+      await ref.read(ttsServiceProvider).stop();
       if (!mounted || session != _voiceLoopSession) return;
-      await _cueListening();
+
+      // Under TalkBack there is no spoken prompt: the student just activated
+      // a button labelled "Voice command", and anything announced now would
+      // be spoken by TalkBack while the microphone opens — and transcribed.
+      // The tone is the prompt.
+      if (!_screenReaderOn) {
+        const prompt = 'Say your command after the tone.';
+        await ref.read(ttsServiceProvider).speakAndWait(prompt);
+        _noteSpoke(prompt);
+        if (!mounted || session != _voiceLoopSession) return;
+        await _cueListening();
+      }
+      await _openVoiceWindow(session, pushToTalk: true);
+    } finally {
+      _voiceStarting = false;
     }
-    await _openVoiceWindow(session, pushToTalk: true);
   }
 
   /// Speaks [text], then opens a short listening window for a spoken command.
@@ -785,7 +817,11 @@ class _StudentLearningHubScreenState
   void _reportVoiceUnavailable(VoiceFailure failure) {
     final reason = switch (failure) {
       VoiceFailure.noInternet =>
-        'Voice commands need the internet, and this phone is not connected.',
+        // Reached only after the offline route was tried too (SttService), so
+        // this phone has no usable offline English speech right now.
+        'Voice commands need the internet, and this phone is not connected. '
+            'To use voice without internet, a helper can download offline '
+            'English speech recognition in the phone settings.',
       VoiceFailure.permissionDenied =>
         'Audio Learner is not allowed to use the microphone. A helper can '
             'allow it in the phone settings.',
@@ -1059,16 +1095,24 @@ class _StudentLearningHubScreenState
   /// TalkBack into the open microphone).
   Future<void> _enterAskMode() async {
     if (!mounted) return;
+    // Already opening or listening for a question: a repeat activation must
+    // not tear that down and start over (see _enterVoiceCommandMode).
+    if (_voiceStarting || _askListening) return;
     final session = ++_voiceLoopSession;
-    await ref.read(sttServiceProvider).stopListening();
-    _stopLessonAudio();
-    await ref.read(ttsServiceProvider).stop();
-    if (!mounted || session != _voiceLoopSession) return;
-    if (!_screenReaderOn) {
-      const prompt = 'What is your question?';
-      await ref.read(ttsServiceProvider).speakAndWait(prompt);
-      _noteSpoke(prompt);
+    _voiceStarting = true;
+    try {
+      await ref.read(sttServiceProvider).stopListening();
+      _stopLessonAudio();
+      await ref.read(ttsServiceProvider).stop();
       if (!mounted || session != _voiceLoopSession) return;
+      if (!_screenReaderOn) {
+        const prompt = 'What is your question?';
+        await ref.read(ttsServiceProvider).speakAndWait(prompt);
+        _noteSpoke(prompt);
+        if (!mounted || session != _voiceLoopSession) return;
+      }
+    } finally {
+      _voiceStarting = false;
     }
     await _listenForQuestion(session);
   }
@@ -1106,6 +1150,7 @@ class _StudentLearningHubScreenState
       final question = words.trim();
       if (question.isEmpty) return;
       handled = true;
+      _askListening = false;
       unawaited(stt.stopListening());
       if (_isEcho(question)) {
         unawaited(_announceAndListen(
@@ -1116,6 +1161,7 @@ class _StudentLearningHubScreenState
     }
 
     void nothingHeard(VoiceFailure failure) {
+      _askListening = false;
       if (handled || session != _voiceLoopSession) return;
       handled = true;
       if (failure == VoiceFailure.noSpeech) {
@@ -1151,7 +1197,20 @@ class _StudentLearningHubScreenState
         }
       },
     );
-    if (!started) nothingHeard(VoiceFailure.busy);
+    if (!started) {
+      nothingHeard(VoiceFailure.busy);
+    } else if (!handled) {
+      _askListening = true;
+      // Cleared by the callbacks above; also cleared whenever the microphone
+      // closes for any other reason, so a later Ask is never blocked.
+      void clearWhenClosed() {
+        if (_stt.listening.value) return;
+        _askListening = false;
+        _stt.listening.removeListener(clearWhenClosed);
+      }
+
+      _stt.listening.addListener(clearWhenClosed);
+    }
   }
 
   /// Answers [question] using only the current lesson text, then re-arms the
@@ -1162,7 +1221,11 @@ class _StudentLearningHubScreenState
 
     final lesson = _currentLesson();
     final text = lesson?.rawText ?? '';
-    final answer = QuestionAnswerService().answer(question, text);
+    // Off the UI thread for long lessons, for the same reason as segmenting.
+    final answer = text.length < 4000
+        ? QuestionAnswerService().answer(question, text)
+        : await compute(_answerInBackground, (question, text));
+    if (!mounted) return;
     _logVoiceEvent('free_ask', question, answer ?? 'no match');
 
     if (answer == null || answer.trim().isEmpty) {
@@ -1812,6 +1875,9 @@ class _StudentLearningHubScreenState
     _lessonSegmentIndex = 0;
     _pausedCharOffset = 0;
     _lessonStarted = false;
+    // Split the lesson now, while the student hears where they are, so the
+    // Play double tap has nothing to compute before the lesson starts.
+    unawaited(_prepareSegments(lesson));
     _announceCurrentState(force: true);
     unawaited(_startVoiceSessionForCurrentLesson());
   }
@@ -1821,6 +1887,9 @@ class _StudentLearningHubScreenState
     if (lesson == null) return;
 
     if (_lessonPlaying) {
+      // A repeat of the play activation while playback is still starting —
+      // not a request to pause (see _playbackStarting).
+      if (_playbackStarting) return;
       // Pause: stop speaking but keep our place so play resumes here.
       _stopLessonAudio();
       _logVoiceEvent('pause', 'Pause lesson', 'Paused.');
@@ -1829,22 +1898,28 @@ class _StudentLearningHubScreenState
       unawaited(_announceAndListen(
           _screenReaderOn ? 'Paused.' : 'Paused. Double tap to resume.'));
     } else {
-      // Play, or resume from the exact word we paused on.
-      _ensureLessonSegments(lesson);
+      // Play, or resume from the exact word we paused on. The card switches
+      // to "Playing" in this frame; the segments are normally ready already.
       setState(() {
         _lessonPlaying = true;
         _lessonStarted = true;
+        _playbackStarting = true;
       });
-      final resuming = _lessonSegmentIndex != 0 || _pausedCharOffset != 0;
-      _logVoiceEvent('repeat', 'Play lesson',
-          resuming ? 'Resuming.' : 'Playing lesson audio.');
       final session = ++_voiceLoopSession;
-      unawaited(_playLessonFrom(
-        session,
-        ++_playbackToken,
-        _lessonSegmentIndex,
-        startCharOffset: _pausedCharOffset,
-      ));
+      final playback = ++_playbackToken;
+      unawaited(() async {
+        await _ensureLessonSegments(lesson);
+        if (!mounted || playback != _playbackToken) return;
+        final resuming = _lessonSegmentIndex != 0 || _pausedCharOffset != 0;
+        _logVoiceEvent('repeat', 'Play lesson',
+            resuming ? 'Resuming.' : 'Playing lesson audio.');
+        await _playLessonFrom(
+          session,
+          playback,
+          _lessonSegmentIndex,
+          startCharOffset: _pausedCharOffset,
+        );
+      }());
     }
   }
 
@@ -1854,41 +1929,90 @@ class _StudentLearningHubScreenState
 
     final playback = ++_playbackToken;
     ref.read(ttsServiceProvider).stop();
-    _ensureLessonSegments(lesson);
-    _lessonSegmentIndex = 0; // replay restarts from the beginning
-    _pausedCharOffset = 0;
     setState(() {
       _lessonPlaying = true;
       _lessonStarted = true;
+      _playbackStarting = true;
     });
     _logVoiceEvent('repeat', 'Replay lesson', 'Replaying from the start.');
     final session = ++_voiceLoopSession;
-    unawaited(_playLessonFrom(session, playback, 0));
-  }
-
-  /// Splits [lesson] into playback segments the first time it is played (or
-  /// when the lesson changes). Keeps the current position if the same lesson
-  /// is still loaded, so resume works across pause/play.
-  void _ensureLessonSegments(Lesson lesson) {
-    if (_segmentsLessonId != lesson.id || _lessonSegments.isEmpty) {
-      _lessonSegments = splitLessonIntoSegments(lesson.rawText);
-      _lessonSegmentIndex = 0;
+    unawaited(() async {
+      await _ensureLessonSegments(lesson);
+      if (!mounted || playback != _playbackToken) return;
+      _lessonSegmentIndex = 0; // replay restarts from the beginning
       _pausedCharOffset = 0;
-      _lessonStarted = false;
-      _segmentsLessonId = lesson.id;
-    }
+      await _playLessonFrom(session, playback, 0);
+    }());
   }
 
-  /// Under TalkBack, the double tap that started an action is followed by
-  /// TalkBack's own feedback — its activation sound, and often a re-read of the
-  /// focused control, whose label has just changed (Play → Pause). There is no
-  /// API to learn when that ends. Speaking at once made the first words of the
-  /// lesson collide with it, so this one short, fixed pause is deliberate.
-  /// Voice-first mode has no such feedback and does not wait.
-  Future<void> _letTalkBackFinishActivation() async {
-    if (_screenReaderOn) {
-      await Future<void>.delayed(const Duration(milliseconds: 500));
+  /// Target segment length. Shorter under TalkBack: TalkBack usually speaks
+  /// through the same Google TTS engine, and an engine plays one utterance at
+  /// a time, so TalkBack's reply to a swipe or double tap made during the
+  /// lesson can wait for the current segment to end. Sentence-sized segments
+  /// keep that wait to a sentence instead of a paragraph (and make resume
+  /// land closer to where the student paused).
+  int _segmentTarget() => _screenReaderOn ? 120 : 300;
+
+  /// Starts splitting [lesson] into playback segments, off the UI thread when
+  /// the lesson is long, and returns the result. Repeated calls for the same
+  /// lesson share one computation.
+  ///
+  /// Splitting an 80,000-character lesson takes about 50 ms on a desktop and
+  /// several times that on a low-cost phone. Done inside the Play handler, on
+  /// the UI thread, that froze the app at the very moment the student
+  /// expected the lesson to start — and held up the next activation too.
+  Future<List<LessonSegment>> _prepareSegments(Lesson lesson) {
+    final target = _segmentTarget();
+    final key = Object.hash(lesson.id, target);
+    final pending = _segmentsPending;
+    if (pending != null && _segmentsPendingKey == key) return pending;
+    _segmentsPendingKey = key;
+    // A short lesson splits in well under a millisecond — cheaper than
+    // starting an isolate.
+    return _segmentsPending = lesson.rawText.length < 4000
+        ? Future.value(
+            splitLessonIntoSegments(lesson.rawText, targetLength: target))
+        : compute(_splitLessonInBackground, (lesson.rawText, target));
+  }
+
+  /// Makes sure the segments for [lesson] are loaded. Keeps the current
+  /// position if the same lesson is still loaded, so resume works across
+  /// pause/play.
+  Future<void> _ensureLessonSegments(Lesson lesson) async {
+    final target = _segmentTarget();
+    if (_segmentsLessonId == lesson.id &&
+        _segmentsTarget == target &&
+        _lessonSegments.isNotEmpty) {
+      return;
     }
+    final segments = await _prepareSegments(lesson);
+    if (!mounted) return;
+    // Same lesson re-split for the other mode: keep roughly the same place.
+    final keepPlace = _segmentsLessonId == lesson.id;
+    final consumed = keepPlace ? _charsBeforeCurrentSegment() : 0;
+    _lessonSegments = segments;
+    _segmentsLessonId = lesson.id;
+    _segmentsTarget = target;
+    _lessonSegmentIndex = 0;
+    _pausedCharOffset = 0;
+    if (keepPlace) {
+      var seen = 0;
+      while (_lessonSegmentIndex < segments.length &&
+          seen + segments[_lessonSegmentIndex].text.length <= consumed) {
+        seen += segments[_lessonSegmentIndex].text.length;
+        _lessonSegmentIndex++;
+      }
+    }
+    // (_lessonStarted is reset where a different lesson is opened —
+    // _openCurrentTopic — not here: this runs after Play has set it.)
+  }
+
+  int _charsBeforeCurrentSegment() {
+    var n = 0;
+    for (var i = 0; i < _lessonSegmentIndex && i < _lessonSegments.length; i++) {
+      n += _lessonSegments[i].text.length;
+    }
+    return n + _pausedCharOffset;
   }
 
   /// Ends playback run [playback]: clears "Playing" unless a newer run has
@@ -1897,6 +2021,7 @@ class _StudentLearningHubScreenState
   /// another flow (a dialog, the progress screen, a voice command) left the
   /// card saying "Playing" over silence.
   void _endPlaybackRun(int playback) {
+    if (playback == _playbackToken) _playbackStarting = false;
     if (mounted && playback == _playbackToken && _lessonPlaying) {
       setState(() => _lessonPlaying = false);
     }
@@ -1913,14 +2038,17 @@ class _StudentLearningHubScreenState
     int playback,
     int startIndex, {
     int startCharOffset = 0,
-    bool settle = true,
   }) async {
     final tts = ref.read(ttsServiceProvider);
     bool interrupted() =>
         !mounted || session != _voiceLoopSession || !_lessonPlaying;
 
+    // No fixed wait before speaking. An earlier half-second pause, meant to
+    // let TalkBack's activation feedback finish, was dead time our own code
+    // added to the most important action; the TTS engine already plays
+    // TalkBack's and our utterances one after another when they share it.
     await ref.read(sttServiceProvider).stopListening();
-    if (settle) await _letTalkBackFinishActivation();
+    if (playback == _playbackToken) _playbackStarting = false;
     if (interrupted()) return _endPlaybackRun(playback);
 
     // Safety net: never let a play action fall straight through to "end of
@@ -2041,7 +2169,6 @@ class _StudentLearningHubScreenState
       int session, int playback, String label) async {
     final tts = ref.read(ttsServiceProvider);
     await ref.read(sttServiceProvider).stopListening();
-    await _letTalkBackFinishActivation();
     if (!mounted || session != _voiceLoopSession) {
       return _endPlaybackRun(playback);
     }
@@ -2054,7 +2181,6 @@ class _StudentLearningHubScreenState
       playback,
       _lessonSegmentIndex,
       startCharOffset: _pausedCharOffset,
-      settle: false,
     );
   }
 
@@ -3517,7 +3643,11 @@ class _StudentLearningHubScreenState
         label: listening ? 'Stop listening' : 'Voice command',
         hint: listening
             ? 'stop listening'
-            : 'speak a command after the tone, like next, play, or answer two',
+            : _stt.offlineReady
+                ? 'speak a command after the tone, like next, play, or answer '
+                    'two. Works without internet'
+                : 'speak a command after the tone, like next, play, or answer '
+                    'two',
         icon: listening ? Icons.mic_off_rounded : Icons.mic_rounded,
         background: listening
             ? const Color(0xFF16A34A)
@@ -3559,7 +3689,13 @@ class _StudentLearningHubScreenState
         valueListenable: _stt.listening,
         builder: (context, listening, _) {
           final (IconData icon, Color color, String? text) = listening
-              ? (Icons.mic_rounded, const Color(0xFF16A34A), 'Listening')
+              ? (
+                  Icons.mic_rounded,
+                  const Color(0xFF16A34A),
+                  _stt.route.value == RecognitionRoute.onDevice
+                      ? 'Listening (offline)'
+                      : 'Listening',
+                )
               : _voiceUnavailable != null
                   ? (Icons.mic_off_rounded, const Color(0xFFDC2626),
                       'Voice off')
@@ -3758,6 +3894,13 @@ class _StudentLearningHubScreenState
     );
   }
 }
+
+/// Isolate entry points (must be top-level for [compute]).
+List<LessonSegment> _splitLessonInBackground((String, int) args) =>
+    splitLessonIntoSegments(args.$1, targetLength: args.$2);
+
+String? _answerInBackground((String, String) args) =>
+    QuestionAnswerService().answer(args.$1, args.$2);
 
 class _QuizOption {
   const _QuizOption({required this.label, required this.text});
@@ -4628,8 +4771,11 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
       case _JoinStage.success:
         return [primary('Done', () => Navigator.pop(context))];
       case _JoinStage.loading:
-      case _JoinStage.linking:
         return const [];
+      case _JoinStage.linking:
+        // Joining can wait up to a minute on a sleeping server. The student
+        // must never be left with no control at all while it does.
+        return [cancel];
       case _JoinStage.intro:
         return [cancel, primary('Start', _handleTap)];
       case _JoinStage.askName:
