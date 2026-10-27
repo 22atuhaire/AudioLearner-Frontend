@@ -150,20 +150,41 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
     await tts.speak(text);
   }
 
+  // Listening windows opened since the last request, and whether one is
+  // open or opening now.
+  int _roleWindows = 0;
+  static const int _maxRoleWindows = 3;
+  bool _roleListening = false;
+
   /// Voice-first role pick: listens for "student" or "teacher" and navigates
-  /// accordingly. Re-listens on silence/unclear speech. The tap zones below
-  /// remain fully functional as a fallback.
-  Future<void> _listenForRole() async {
+  /// accordingly. Re-listens on silence a bounded number of times (once per
+  /// request under TalkBack). The tap zones below remain fully functional as a
+  /// fallback.
+  ///
+  /// It used to re-listen forever. Under TalkBack, one press of "Say student
+  /// or teacher" left the recognizer starting and stopping in the background
+  /// — chiming, holding the microphone and the phone's main thread — while the
+  /// student tried to use TalkBack. A repeat press while it is already
+  /// listening is ignored instead of starting a second session.
+  Future<void> _listenForRole({bool fresh = true}) async {
     if (!mounted || _navigated) return;
+    if (fresh) {
+      if (_roleListening) return;
+      _roleWindows = 0;
+    }
+    _roleListening = true;
 
     final stt = ref.read(sttServiceProvider);
     final ready = await stt.initialize();
-    if (!ready || !mounted || _navigated) return;
+    if (!ready || !mounted || _navigated) {
+      _roleListening = false;
+      return;
+    }
+    _roleWindows++;
 
-    try {
-      await HapticFeedback.mediumImpact();
-      await SystemSound.play(SystemSoundType.click);
-    } catch (_) {}
+    // The cue marks the microphone opening; it must not delay it.
+    unawaited(HapticFeedback.mediumImpact().catchError((_) {}));
+    unawaited(SystemSound.play(SystemSoundType.click).catchError((_) {}));
 
     var handled = false;
     void match(String words) {
@@ -192,17 +213,26 @@ class _RoleSelectionScreenState extends ConsumerState<RoleSelectionScreen> {
       }
     }
 
-    await stt.startListening(
+    final started = await stt.startListening(
       // Single-keyword pick: matching on partials keeps the response instant,
       // while the final result acts as a safety net for slower recognisers.
       onPartial: match,
       onResult: match,
       onDone: () {
+        _roleListening = false;
         if (handled || _navigated || !mounted) return;
         handled = true;
-        unawaited(_listenForRole());
+        if (AccessibilityMode.isScreenReaderActive ||
+            _roleWindows >= _maxRoleWindows) {
+          return;
+        }
+        unawaited(_listenForRole(fresh: false));
       },
+      // An engine failure (no internet, busy, no permission) will not fix
+      // itself by retrying at once; the buttons are still there.
+      onError: (_) => _roleListening = false,
     );
+    if (!started) _roleListening = false;
   }
 
   void _openStudent() {

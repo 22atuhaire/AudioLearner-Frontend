@@ -117,8 +117,9 @@ the lesson voice, in sequence. Removed the speculative "retry if TalkBack
 cancelled" logic (the real cause was the TtsService race); engine failures are
 now reported. Fixes D.
 
-**One remaining fixed delay, documented:** 500 ms before lesson speech starts
-under TalkBack, because TalkBack gives activation feedback we cannot observe.
+**Superseded:** this change originally kept a 500 ms wait before lesson speech
+under TalkBack. It was removed as a cause of slow double taps — see
+[VOICE_AND_RESPONSIVENESS.md](VOICE_AND_RESPONSIVENESS.md).
 
 **Mode changes.** The hub observes accessibility changes (TalkBack toggled
 mid-session: close mic, pause lesson, re-orient) and app lifecycle (backgrounded:
@@ -208,7 +209,7 @@ Automated (all passing, `flutter test`: 56 tests, `flutter analyze`: clean):
   tap reopens the mic.
 
 **Not yet tested — needs a device:** real TalkBack honouring the focus moves
-(especially right after a node is removed); timing of the 500 ms settle against
+(especially right after a node is removed); whether the first lesson words collide with
 TalkBack's activation feedback; ducking behaviour; offline / slow network;
 permission denied/granted; different TTS engines; low-end phone (e.g. Samsung
 A04e) recognizer busy timing. The Android debug build was run separately (see
@@ -259,7 +260,6 @@ the hand-off notes).
 - Voice input needs internet unless the phone has Google's offline speech pack.
 - Lesson audio uses the media stream and does not request audio focus, so other
   apps' music is not paused and TalkBack ducks the lesson while it speaks.
-- One deliberate 500 ms delay before lesson speech under TalkBack.
 - No notification/lock-screen controls; the lesson pauses when the app leaves
   the foreground.
 - Switch Access users do not get the controls panel (touch exploration is off
