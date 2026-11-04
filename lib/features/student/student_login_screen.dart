@@ -296,6 +296,18 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
     await _promptName();
   }
 
+  Future<void> _startNewStudentVoice() async {
+    if (!mounted) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _addingNew = true;
+      _pendingName = null;
+      _nameRetryAvailable = false;
+      _confirmationRetryAvailable = false;
+    });
+    await _promptName();
+  }
+
   // ── Echo stripping ──────────────────────────────────────────────────────
   // On some devices the TTS engine reports "complete" BEFORE the audio has
   // fully left the speaker, so the microphone opens early and captures the
@@ -722,9 +734,26 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
                     const SizedBox(height: 12),
                   ],
                   if (_addingNew) ...[
+                    if (AccessibilityMode.isScreenReaderActive &&
+                        _pendingName == null &&
+                        !_nameRetryAvailable) ...[
+                      Semantics(
+                        button: true,
+                        label: 'Speak new student name',
+                        onTapHint: 'say your name after the tone',
+                        onTap: () => unawaited(_promptName()),
+                        excludeSemantics: true,
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.mic_rounded),
+                          label: const Text('Speak name with voice'),
+                          onPressed: () => unawaited(_promptName()),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     TextField(
                       controller: _nameController,
-                      autofocus: true,
+                      autofocus: !AccessibilityMode.isScreenReaderActive,
                       textCapitalization: TextCapitalization.words,
                       textInputAction: TextInputAction.done,
                       onEditingComplete: () {
@@ -741,23 +770,6 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
                         _submitTypedName();
                       },
                     ),
-                    if (AccessibilityMode.isScreenReaderActive &&
-                        _pendingName == null &&
-                        !_nameRetryAvailable) ...[
-                      const SizedBox(height: 10),
-                      Semantics(
-                        button: true,
-                        label: 'Say name after the tone',
-                        onTapHint: 'start voice name registration',
-                        onTap: () => unawaited(_promptName()),
-                        excludeSemantics: true,
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.mic_rounded),
-                          label: const Text('Say name after the tone'),
-                          onPressed: () => unawaited(_promptName()),
-                        ),
-                      ),
-                    ],
                     if (_pendingName != null) ...[
                       const SizedBox(height: 10),
                       Semantics(
@@ -884,6 +896,27 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
                         ],
                       ),
                     ),
+                    if (AccessibilityMode.isScreenReaderActive) ...[
+                      Semantics(
+                        button: true,
+                        label: 'Speak new student name',
+                        onTapHint: 'say a new student name after the tone',
+                        onTap: () => unawaited(_startNewStudentVoice()),
+                        excludeSemantics: true,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(56),
+                            padding: const EdgeInsets.all(16),
+                            textStyle: const TextStyle(
+                                fontSize: 18, fontWeight: FontWeight.w700),
+                          ),
+                          icon: const Icon(Icons.mic_rounded, size: 24),
+                          label: const Text('Speak new student name'),
+                          onPressed: () => unawaited(_startNewStudentVoice()),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
                     Semantics(
                       button: true,
                       label: 'New student',
