@@ -9,6 +9,7 @@ import 'ai_question_service.dart';
 import 'backend_api_service.dart';
 import 'backend_link_service.dart';
 import 'progress_summary_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // Database
 final appDatabaseProvider = Provider<AppDatabase>(
@@ -94,7 +95,11 @@ final teacherSubjectsProvider =
 final allSubjectsProvider =
     FutureProvider.autoDispose<List<Subject>>((ref) async {
   final db = ref.watch(appDatabaseProvider);
-  final student = await db.studentDao.getStudent();
+  final prefs = await SharedPreferences.getInstance();
+  final activeStudentId = prefs.getInt('active_student_id');
+  final student = activeStudentId == null
+      ? await db.studentDao.getStudent()
+      : await db.studentDao.getStudentById(activeStudentId);
   if (student == null) return [];
 
   // A shared device must not expose a teacher's local subjects to a student.

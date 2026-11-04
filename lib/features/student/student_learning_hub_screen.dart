@@ -478,8 +478,9 @@ class _StudentLearningHubScreenState
     }
 
     ref.invalidate(allSubjectsProvider);
+    List<Subject> refreshedSubjects;
     try {
-      await ref.read(allSubjectsProvider.future);
+      refreshedSubjects = await ref.read(allSubjectsProvider.future);
     } catch (_) {
       if (!mounted) return;
       AccessibilityMode.announce(
@@ -489,7 +490,7 @@ class _StudentLearningHubScreenState
     }
     if (!mounted) return;
 
-    final after = _subjects().length;
+    final after = refreshedSubjects.length;
     if (after > before || addedLessons > 0) {
       AccessibilityMode.announce(
         'New subjects are available. $after subject${after == 1 ? '' : 's'} '
