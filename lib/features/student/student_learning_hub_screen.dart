@@ -1126,7 +1126,9 @@ class _StudentLearningHubScreenState
   /// Listens for a free-form spoken question (longer window than a command).
   Future<void> _listenForQuestion(int session) async {
     final stt = ref.read(sttServiceProvider);
-    await _tts.whenIdle().timeout(const Duration(seconds: 20), onTimeout: () {});
+    await _tts
+        .whenIdle()
+        .timeout(const Duration(seconds: 20), onTimeout: () {});
     if (!mounted || session != _voiceLoopSession) return;
     final ready = await stt.initialize();
     if (!mounted || session != _voiceLoopSession) return;
@@ -1153,8 +1155,8 @@ class _StudentLearningHubScreenState
       _askListening = false;
       unawaited(stt.stopListening());
       if (_isEcho(question)) {
-        unawaited(_announceAndListen(
-            'I did not catch that. $_afterAnswerHint'));
+        unawaited(
+            _announceAndListen('I did not catch that. $_afterAnswerHint'));
       } else {
         unawaited(_answerQuestion(question));
       }
@@ -1165,8 +1167,8 @@ class _StudentLearningHubScreenState
       if (handled || session != _voiceLoopSession) return;
       handled = true;
       if (failure == VoiceFailure.noSpeech) {
-        unawaited(_announceAndListen(
-            'I did not hear a question. $_afterAnswerHint'));
+        unawaited(
+            _announceAndListen('I did not hear a question. $_afterAnswerHint'));
       } else {
         _reportVoiceUnavailable(failure);
       }
@@ -2009,7 +2011,9 @@ class _StudentLearningHubScreenState
 
   int _charsBeforeCurrentSegment() {
     var n = 0;
-    for (var i = 0; i < _lessonSegmentIndex && i < _lessonSegments.length; i++) {
+    for (var i = 0;
+        i < _lessonSegmentIndex && i < _lessonSegments.length;
+        i++) {
       n += _lessonSegments[i].text.length;
     }
     return n + _pausedCharOffset;
@@ -2464,7 +2468,8 @@ class _StudentLearningHubScreenState
                           color: accent.withValues(alpha: 0.16),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.quiz_rounded, color: accent, size: 28),
+                        child: const Icon(Icons.quiz_rounded,
+                            color: accent, size: 28),
                       ),
                       const SizedBox(width: 10),
                       Text(
@@ -2507,9 +2512,10 @@ class _StudentLearningHubScreenState
                 // If already answered, show feedback and next question action
                 if (_quizAnswered) ...[
                   Builder(builder: (context) {
-                    final selected = options[_answerIndex.clamp(0, options.length - 1)];
-                    final correct =
-                        question.correctOption.toUpperCase() == _letterOf(selected);
+                    final selected =
+                        options[_answerIndex.clamp(0, options.length - 1)];
+                    final correct = question.correctOption.toUpperCase() ==
+                        _letterOf(selected);
                     final correctNumber = const ['A', 'B', 'C', 'D']
                             .indexOf(question.correctOption.toUpperCase()) +
                         1;
@@ -2532,11 +2538,15 @@ class _StudentLearningHubScreenState
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
                             color: correct
-                                ? const Color(0xFF16A34A).withValues(alpha: 0.12)
-                                : const Color(0xFFDC2626).withValues(alpha: 0.12),
+                                ? const Color(0xFF16A34A)
+                                    .withValues(alpha: 0.12)
+                                : const Color(0xFFDC2626)
+                                    .withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
-                              color: correct ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                              color: correct
+                                  ? const Color(0xFF16A34A)
+                                  : const Color(0xFFDC2626),
                               width: 1.5,
                             ),
                           ),
@@ -2546,8 +2556,12 @@ class _StudentLearningHubScreenState
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
                                   Icon(
-                                    correct ? Icons.check_circle_rounded : Icons.cancel_rounded,
-                                    color: correct ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                                    correct
+                                        ? Icons.check_circle_rounded
+                                        : Icons.cancel_rounded,
+                                    color: correct
+                                        ? const Color(0xFF16A34A)
+                                        : const Color(0xFFDC2626),
                                     size: 28,
                                   ),
                                   const SizedBox(width: 8),
@@ -2556,7 +2570,9 @@ class _StudentLearningHubScreenState
                                     style: TextStyle(
                                       fontSize: 18,
                                       fontWeight: FontWeight.w900,
-                                      color: correct ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                                      color: correct
+                                          ? const Color(0xFF16A34A)
+                                          : const Color(0xFFDC2626),
                                     ),
                                   ),
                                 ],
@@ -2621,13 +2637,16 @@ class _StudentLearningHubScreenState
                         onTap: _continueQuiz,
                         child: Container(
                           constraints: const BoxConstraints(minHeight: 56),
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 14),
                           alignment: Alignment.center,
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(
-                                isLast ? Icons.check_circle_rounded : Icons.arrow_forward_rounded,
+                                isLast
+                                    ? Icons.check_circle_rounded
+                                    : Icons.arrow_forward_rounded,
                                 color: Colors.white,
                                 size: 24,
                               ),
@@ -2665,19 +2684,24 @@ class _StudentLearningHubScreenState
                           excludeSemantics: true,
                           child: Material(
                             color: isSelected
-                                ? const Color(0xFF1A56DB).withValues(alpha: 0.18)
+                                ? const Color(0xFF1A56DB)
+                                    .withValues(alpha: 0.18)
                                 : Colors.white.withValues(alpha: 0.85),
                             borderRadius: BorderRadius.circular(16),
                             child: InkWell(
                               borderRadius: BorderRadius.circular(16),
                               onTap: () => unawaited(_submitAnswer(i)),
                               child: Container(
-                                constraints: const BoxConstraints(minHeight: 56),
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                constraints:
+                                    const BoxConstraints(minHeight: 56),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14, vertical: 12),
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(16),
                                   border: Border.all(
-                                    color: isSelected ? const Color(0xFF1A56DB) : Colors.grey.shade300,
+                                    color: isSelected
+                                        ? const Color(0xFF1A56DB)
+                                        : Colors.grey.shade300,
                                     width: isSelected ? 2.5 : 1,
                                   ),
                                 ),
@@ -2688,13 +2712,17 @@ class _StudentLearningHubScreenState
                                       height: 32,
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
-                                        color: isSelected ? const Color(0xFF1A56DB) : Colors.grey.shade200,
+                                        color: isSelected
+                                            ? const Color(0xFF1A56DB)
+                                            : Colors.grey.shade200,
                                       ),
                                       alignment: Alignment.center,
                                       child: Text(
                                         opt.label,
                                         style: TextStyle(
-                                          color: isSelected ? Colors.white : const Color(0xFF1A56DB),
+                                          color: isSelected
+                                              ? Colors.white
+                                              : const Color(0xFF1A56DB),
                                           fontWeight: FontWeight.w900,
                                           fontSize: 15,
                                         ),
@@ -2706,7 +2734,9 @@ class _StudentLearningHubScreenState
                                         opt.text,
                                         style: TextStyle(
                                           fontSize: 15,
-                                          fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                                          fontWeight: isSelected
+                                              ? FontWeight.w800
+                                              : FontWeight.w600,
                                           color: Colors.grey.shade900,
                                           height: 1.25,
                                         ),
@@ -2757,147 +2787,148 @@ class _StudentLearningHubScreenState
     return AccessibilityFocusTarget(
       request: _focusRequestFor(_FocusTarget.card),
       child: Semantics(
-      container: true,
-      button: true,
-      label: semanticLabel,
-      onTapHint: onTapHint,
-      onTap: onTap,
-      excludeSemantics: true,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(28),
-          onTap: onTap,
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  accent.withValues(alpha: 0.18),
-                  accent.withValues(alpha: 0.05)
+        container: true,
+        button: true,
+        label: semanticLabel,
+        onTapHint: onTapHint,
+        onTap: onTap,
+        excludeSemantics: true,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(28),
+            onTap: onTap,
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    accent.withValues(alpha: 0.18),
+                    accent.withValues(alpha: 0.05)
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(28),
+                boxShadow: [
+                  BoxShadow(
+                    color: accent.withValues(alpha: 0.15),
+                    blurRadius: 24,
+                    offset: const Offset(0, 14),
+                  ),
                 ],
               ),
-              borderRadius: BorderRadius.circular(28),
-              boxShadow: [
-                BoxShadow(
-                  color: accent.withValues(alpha: 0.15),
-                  blurRadius: 24,
-                  offset: const Offset(0, 14),
-                ),
-              ],
-            ),
-            padding: const EdgeInsets.all(20),
-            // Scrollable, but still vertically centred when there is room.
-            //
-            // Two things legitimately shrink this card's space: the screen-reader
-            // control panel below it, and a large system font scale — which the
-            // low-vision students this app serves very often have turned on. Either
-            // one previously produced a RenderFlex overflow and clipped content off
-            // the bottom, invisibly. A fixed Column cannot express "centre if you
-            // fit, scroll if you don't"; this can.
-            child: LayoutBuilder(
-              builder: (context, constraints) => SingleChildScrollView(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    // min + the minHeight above: the Column hugs its content, and
-                    // the constraint stretches it to fill only when there is spare
-                    // room, so centring still works without forcing an overflow.
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: accent.withValues(alpha: 0.16),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(icon, color: accent, size: 40),
-                      ),
-                      const SizedBox(height: 16),
-                      if (progress != null) ...[
-                        Text(
-                          progress,
-                          style: TextStyle(
-                            color: accent,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.1,
+              padding: const EdgeInsets.all(20),
+              // Scrollable, but still vertically centred when there is room.
+              //
+              // Two things legitimately shrink this card's space: the screen-reader
+              // control panel below it, and a large system font scale — which the
+              // low-vision students this app serves very often have turned on. Either
+              // one previously produced a RenderFlex overflow and clipped content off
+              // the bottom, invisibly. A fixed Column cannot express "centre if you
+              // fit, scroll if you don't"; this can.
+              child: LayoutBuilder(
+                builder: (context, constraints) => SingleChildScrollView(
+                  child: ConstrainedBox(
+                    constraints:
+                        BoxConstraints(minHeight: constraints.maxHeight),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      // min + the minHeight above: the Column hugs its content, and
+                      // the constraint stretches it to fill only when there is spare
+                      // room, so centring still works without forcing an overflow.
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: accent.withValues(alpha: 0.16),
+                            shape: BoxShape.circle,
                           ),
+                          child: Icon(icon, color: accent, size: 40),
                         ),
-                        const SizedBox(height: 8),
-                      ],
-                      Text(
-                        title,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: accent,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w900,
-                          height: 1.1,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        subtitle,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.grey.shade700,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          height: 1.4,
-                        ),
-                      ),
-                      if (body != null) ...[
                         const SizedBox(height: 16),
-                        Text(
-                          body,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.grey.shade800,
-                            fontSize: 14,
-                            height: 1.5,
+                        if (progress != null) ...[
+                          Text(
+                            progress,
+                            style: TextStyle(
+                              color: accent,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.1,
+                            ),
                           ),
-                        ),
-                      ],
-                      const SizedBox(height: 18),
-                      Container(
-                        width: double.infinity,
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.75),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Text(
-                          actionLabel ?? hint,
+                          const SizedBox(height: 8),
+                        ],
+                        Text(
+                          title,
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: accent,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
+                            fontSize: 28,
+                            fontWeight: FontWeight.w900,
+                            height: 1.1,
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        hint,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.grey.shade600,
-                          fontSize: 12,
+                        const SizedBox(height: 10),
+                        Text(
+                          subtitle,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.grey.shade700,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            height: 1.4,
+                          ),
                         ),
-                      ),
-                    ],
+                        if (body != null) ...[
+                          const SizedBox(height: 16),
+                          Text(
+                            body,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.grey.shade800,
+                              fontSize: 14,
+                              height: 1.5,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 18),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.75),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(
+                            actionLabel ?? hint,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: accent,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          hint,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
           ),
         ),
-      ),
       ),
     );
   }
@@ -3041,8 +3072,9 @@ class _StudentLearningHubScreenState
             final paused = !_lessonPlaying &&
                 _lessonStarted &&
                 _segmentsLessonId == lesson.id;
-            final status =
-                _lessonPlaying ? 'Playing' : (paused ? 'Paused' : 'Ready to play');
+            final status = _lessonPlaying
+                ? 'Playing'
+                : (paused ? 'Paused' : 'Ready to play');
             return _stageCard(
               icon: _lessonPlaying
                   ? Icons.pause_circle_rounded
@@ -3602,8 +3634,8 @@ class _StudentLearningHubScreenState
       case LearningStage.topics:
         add('Previous topic', 'move to the previous topic',
             Icons.chevron_left_rounded, _onSwipeLeft);
-        add('Next topic', 'move to the next topic',
-            Icons.chevron_right_rounded, _onSwipeRight);
+        add('Next topic', 'move to the next topic', Icons.chevron_right_rounded,
+            _onSwipeRight);
         break;
       case LearningStage.lesson:
         add(
@@ -3649,9 +3681,8 @@ class _StudentLearningHubScreenState
                 : 'speak a command after the tone, like next, play, or answer '
                     'two',
         icon: listening ? Icons.mic_off_rounded : Icons.mic_rounded,
-        background: listening
-            ? const Color(0xFF16A34A)
-            : const Color(0xFF1A56DB),
+        background:
+            listening ? const Color(0xFF16A34A) : const Color(0xFF1A56DB),
         onPressed: () => unawaited(_enterVoiceCommandMode()),
       ),
     ));
@@ -3697,11 +3728,17 @@ class _StudentLearningHubScreenState
                       : 'Listening',
                 )
               : _voiceUnavailable != null
-                  ? (Icons.mic_off_rounded, const Color(0xFFDC2626),
-                      'Voice off')
+                  ? (
+                      Icons.mic_off_rounded,
+                      const Color(0xFFDC2626),
+                      'Voice off'
+                    )
                   : _voiceSleeping
-                      ? (Icons.mic_none_rounded, const Color(0xFF64748B),
-                          'Tap to speak')
+                      ? (
+                          Icons.mic_none_rounded,
+                          const Color(0xFF64748B),
+                          'Tap to speak'
+                        )
                       : (Icons.mic_none_rounded, const Color(0xFF64748B), null);
           if (text == null) return const SizedBox.shrink();
           return Padding(
@@ -3783,7 +3820,8 @@ class _StudentLearningHubScreenState
     return Semantics(
       button: true,
       label: 'Sign out',
-      hint: 'Double tap to return to student login and choose a different student',
+      hint:
+          'Double tap to return to student login and choose a different student',
       onTap: () => unawaited(_signOutAndLeave()),
       excludeSemantics: true,
       child: Tooltip(
@@ -3819,20 +3857,20 @@ class _StudentLearningHubScreenState
 
     return ExcludeSemantics(
       child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A56DB).withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w800,
-          color: Color(0xFF1A56DB),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A56DB).withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            color: Color(0xFF1A56DB),
+          ),
         ),
       ),
-    ),
     );
   }
 
@@ -3945,6 +3983,7 @@ class _JoinClassDialog extends ConsumerStatefulWidget {
 
 class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
   static const _baseUrl = kDefaultBackendBaseUrl;
+  static const _expectedCodeCharacters = 4;
 
   _JoinStage _stage = _JoinStage.loading;
   String _statusText = 'Checking your class link…';
@@ -4075,7 +4114,9 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
       setState(() => _pendingListen = null);
       // Our own prompt must have finished — by the engine's completion
       // signal — before the microphone opens.
-      await tts.whenIdle().timeout(const Duration(seconds: 20), onTimeout: () {});
+      await tts
+          .whenIdle()
+          .timeout(const Duration(seconds: 20), onTimeout: () {});
       if (!mounted || session != _session) return;
       if (screenReader) {
         try {
@@ -4092,6 +4133,13 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
 
       var handled = false;
       var longestPartial = '';
+      var bestCodePartial = '';
+      var bestCodeLength = 0;
+      int codeLength(String value) {
+        final normalized = _normalizeCode(value);
+        return normalized == 'SC-' ? 0 : normalized.substring(3).length;
+      }
+
       setState(() => _statusText = 'Listening… speak now.');
 
       void unclear() {
@@ -4112,30 +4160,48 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
           if (partial.length > longestPartial.length) {
             longestPartial = partial;
           }
+          if (listeningStage == _JoinStage.askCode) {
+            final suffixLength = codeLength(partial);
+            if (suffixLength > bestCodeLength &&
+                suffixLength <= _expectedCodeCharacters) {
+              bestCodeLength = suffixLength;
+              bestCodePartial = partial;
+            }
+          }
         },
         onResult: (words) {
           if (handled || session != _session) return;
           final trimmed = words.trim();
           if (trimmed.isEmpty) return;
-          final recognized =
-              trimmed.length >= longestPartial.length ? trimmed : longestPartial;
+          final finalCodeLength =
+              listeningStage == _JoinStage.askCode ? codeLength(trimmed) : 0;
+          final recognized = listeningStage == _JoinStage.askCode &&
+                  bestCodeLength > finalCodeLength
+              ? bestCodePartial
+              : trimmed.length >= longestPartial.length
+                  ? trimmed
+                  : longestPartial;
           handled = true;
           unawaited(onHeard(recognized));
         },
         onDone: () {
           if (handled || session != _session) return;
-          if (longestPartial.isNotEmpty) {
+          final codePartial =
+              listeningStage == _JoinStage.askCode && bestCodeLength > 0;
+          if (codePartial || longestPartial.isNotEmpty) {
             handled = true;
-            unawaited(onHeard(longestPartial));
+            unawaited(onHeard(codePartial ? bestCodePartial : longestPartial));
           } else {
             unclear();
           }
         },
         onError: (message) {
           if (handled || session != _session) return;
-          if (longestPartial.isNotEmpty) {
+          final codePartial =
+              listeningStage == _JoinStage.askCode && bestCodeLength > 0;
+          if (codePartial || longestPartial.isNotEmpty) {
             handled = true;
-            unawaited(onHeard(longestPartial));
+            unawaited(onHeard(codePartial ? bestCodePartial : longestPartial));
             return;
           }
           // No internet or no permission will fail every time: say so and
@@ -4218,8 +4284,9 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
     await _captureSpeech(
       prompt: 'Now ask your teacher for the four letters or numbers after '
           'S C dash in the class code. Say only those four characters, one '
-          'at a time. Do not say S C or dash. A helper can also type the four '
-          'characters in the box on the screen.',
+          'at a time. Do not say S C or dash. If the code contains W, you '
+          'can say double U or W. A helper can also type the four characters '
+          'in the box on the screen.',
       listeningStage: _JoinStage.askCode,
       onHeard: (heard) async {
         await ref.read(sttServiceProvider).stopListening();
@@ -4233,8 +4300,14 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
       },
       onUnclear: () async {
         if (!mounted) return;
-        await _say('I didn\'t catch the code. Let\'s try again.');
-        await _beginCodeCapture();
+        setState(() {
+          _stage = _JoinStage.error;
+          _pendingListen = null;
+        });
+        await _say(
+          'I didn\'t catch all four characters. Activate Try again and '
+          'speak one character at a time, or type the code below.',
+        );
       },
     );
   }
@@ -4403,10 +4476,12 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
   /// and supplies the fixed `SC-` prefix. If speech includes the prefix
   /// anyway, it is removed so common variants still converge.
   static String _normalizeCode(String raw) {
-    final tokens = raw
+    final expanded = raw
         .toLowerCase()
-        .split(RegExp(r'[\s\-_,]+'))
-        .where((t) => t.isNotEmpty);
+        .replaceAll(RegExp(r'\bdouble[\s-]+(u|you)\b'), ' w ')
+        .replaceAll(RegExp(r'\btwo[\s-]+(u|you)\b'), ' w ');
+    final tokens =
+        expanded.split(RegExp(r'[\s\-_,]+')).where((t) => t.isNotEmpty);
 
     final buffer = StringBuffer();
     for (final token in tokens) {
@@ -4446,6 +4521,7 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
 
     switch (token) {
       case 'zero':
+        return '0';
       case 'one':
       case 'won':
         return '1';
@@ -4676,7 +4752,8 @@ class _JoinClassDialogState extends ConsumerState<_JoinClassDialog> {
                             onTap: () => FocusScope.of(context).unfocus(),
                             excludeSemantics: true,
                             child: OutlinedButton.icon(
-                              icon: const Icon(Icons.keyboard_hide_rounded, size: 18),
+                              icon: const Icon(Icons.keyboard_hide_rounded,
+                                  size: 18),
                               label: const Text('Close keyboard'),
                               onPressed: () => FocusScope.of(context).unfocus(),
                             ),
