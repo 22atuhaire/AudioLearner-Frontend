@@ -31,6 +31,10 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
   bool _addingNew = false;
   final TextEditingController _nameController = TextEditingController();
   int _session = 0;
+  String? _pendingName;
+  bool _nameRetryAvailable = false;
+  bool _confirmationRetryAvailable = false;
+  Future<void> Function()? _retryConfirmationAction;
 
   // ── Voice budgets ────────────────────────────────────────────────────────
   // Name capture and yes/no confirmation get SEPARATE budgets. They used to
@@ -115,14 +119,24 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
   /// the pupil experienced between attempts.
   Future<void> _promptName({bool retry = false}) async {
     if (!mounted) return;
+    if (_stt.isListening || _nameRetryAvailable) return;
+    final ready = await _stt.initialize();
+    if (!ready || !mounted) {
+      await _offerNameRetry(_session);
+      return;
+    }
     if (_namePrompts >= _maxNamePrompts) {
       await _giveUpToTapFallback();
       return;
     }
     _namePrompts++;
     final session = ++_session;
+    _pendingName = null;
+    _nameController.clear();
+    await _tts.stop();
     await _stt.stopListening();
-    // Let the recogniser fully release before asking it to start again.
+    // Let the recogniser fully release before asking it to start again. This
+    // is only used after an explicit retry, never as an automatic retry loop.
     await Future<void>.delayed(_recognizerCooldown);
     if (!mounted || session != _session) return;
 
@@ -132,11 +146,17 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
             ? 'Welcome. What is your name? Say it after the tone.'
             : 'Say your name after the tone.');
     _lastPromptNorm = _normEcho(prompt);
-    await _tts.speakAndWait(prompt);
-    if (!mounted || session != _session) return;
-    // Let the prompt's audio tail drain before opening the mic, so the
-    // recognizer doesn't transcribe our own voice or miss the first word.
-    await Future<void>.delayed(const Duration(milliseconds: 400));
+    if (AccessibilityMode.isScreenReaderActive) {
+      // TalkBack activated the labelled "Say name" control, so it has already
+      // spoken the instruction. Do not start a second TTS voice over it.
+      AccessibilityMode.announce('Listening. Say your name after the tone.');
+    } else {
+      await _tts.speakAndWait(prompt);
+      if (!mounted || session != _session) return;
+      // Let the prompt's audio tail drain before opening the mic, so the
+      // recognizer doesn't transcribe our own voice or miss the first word.
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    }
     if (!mounted || session != _session) return;
 
     await _cueListening();
@@ -144,8 +164,89 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
     _listen(
       session,
       (words) => _handleHeardName(words),
-      onNothing: () => _promptName(retry: true),
+      onNothing: () => _offerNameRetry(session),
     );
+  }
+
+  Future<void> _offerNameRetry(int session) async {
+    if (!mounted || session != _session) return;
+    await _stt.stopListening();
+    if (!mounted || session != _session) return;
+    setState(() {
+      _pendingName = null;
+      _nameRetryAvailable = true;
+      _nameController.clear();
+    });
+    final message = AccessibilityMode.isScreenReaderActive
+        ? 'I did not hear a name. Activate Try again to repeat the attempt.'
+        : 'I did not hear a name. Tap anywhere to try again.';
+    if (AccessibilityMode.isScreenReaderActive) {
+      AccessibilityMode.announce(message);
+    } else {
+      await _tts.speakAndWait(message);
+    }
+  }
+
+  Future<void> _retryName() async {
+    if (!mounted || !_nameRetryAvailable) return;
+    setState(() {
+      _nameRetryAvailable = false;
+      _pendingName = null;
+      _nameController.clear();
+    });
+    _recognizerErrors = 0;
+    ++_session;
+    await _tts.stop();
+    await _promptName(retry: true);
+  }
+
+  Future<void> _offerConfirmationRetry(
+    String prompt, {
+    required Future<void> Function() onYes,
+    required Future<void> Function() onNo,
+  }) async {
+    if (!mounted) return;
+    await _stt.stopListening();
+    ++_session;
+    _retryConfirmationAction = () => _confirm(
+          prompt,
+          onYes: onYes,
+          onNo: onNo,
+        );
+    setState(() => _confirmationRetryAvailable = true);
+    const message = 'I did not hear yes or no. Tap anywhere to hear the '
+        'confirmation again.';
+    if (AccessibilityMode.isScreenReaderActive) {
+      AccessibilityMode.announce(message);
+    } else {
+      await _tts.speakAndWait(message);
+    }
+  }
+
+  Future<void> _retryConfirmation() async {
+    final retry = _retryConfirmationAction;
+    if (!mounted || !_confirmationRetryAvailable || retry == null) return;
+    setState(() {
+      _confirmationRetryAvailable = false;
+      _retryConfirmationAction = null;
+    });
+    await _tts.stop();
+    await retry();
+  }
+
+  Future<void> _acceptPendingName() async {
+    final name = _pendingName;
+    if (!mounted || name == null || name.trim().isEmpty) return;
+    setState(() {
+      _pendingName = null;
+      _nameRetryAvailable = false;
+    });
+    final (best, score) = _bestMatch(name);
+    if (best != null && score >= 0.6) {
+      await _login(best);
+    } else {
+      await _createAndLogin(name);
+    }
   }
 
   /// Marks the exact moment the microphone opens. A pupil who cannot see a
@@ -322,6 +423,7 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
   }
 
   Future<void> _handleHeardName(String heard) async {
+    if (!mounted) return;
     // Natural speech lead-ins are not part of the name.
     var body = _normEcho(heard);
     for (final lead in [
@@ -338,7 +440,17 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
     }
     final cleaned = _titleCase(body);
     if (_normalize(cleaned).isEmpty) {
-      await _promptName(retry: true);
+      await _offerNameRetry(_session);
+      return;
+    }
+    if (AccessibilityMode.isScreenReaderActive) {
+      setState(() {
+        _pendingName = cleaned;
+        _nameRetryAvailable = false;
+      });
+      AccessibilityMode.announce(
+        'I heard $cleaned. Activate Accept name to continue, or Try again.',
+      );
       return;
     }
     final (best, score) = _bestMatch(cleaned);
@@ -395,10 +507,18 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
         } else if (yn == false) {
           await onNo();
         } else {
-          await _confirm(prompt, onYes: onYes, onNo: onNo);
+          await _offerConfirmationRetry(
+            prompt,
+            onYes: onYes,
+            onNo: onNo,
+          );
         }
       },
-      onNothing: () => _confirm(prompt, onYes: onYes, onNo: onNo),
+      onNothing: () => _offerConfirmationRetry(
+        prompt,
+        onYes: onYes,
+        onNo: onNo,
+      ),
       listenFor: const Duration(seconds: 12),
       pauseFor: const Duration(seconds: 5),
     );
@@ -541,170 +661,254 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
         }
       },
       child: Scaffold(
-      backgroundColor: const Color(0xFFEBF2FF),
-      // Tap-anywhere recovery, active ONLY after voice has given up. A blind
-      // pupil cannot find the buttons below, so without this the screen was a
-      // dead end. Child buttons keep their own taps; this catches empty space.
-      body: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: _voiceGaveUp ? () => unawaited(_restartVoice()) : null,
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 12),
-                const Text(
-                  'Who is learning?',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 30,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1A56DB),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                if (_voiceGaveUp) ...[
-                  Semantics(
-                    button: true,
-                    label: 'Try voice again',
-                    onTap: () => unawaited(_restartVoice()),
-                    excludeSemantics: true,
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.mic_rounded),
-                      label: const Text('Try voice again'),
-                      onPressed: () => unawaited(_restartVoice()),
-                    ),
-                  ),
+        backgroundColor: const Color(0xFFEBF2FF),
+        // Tap-anywhere recovery, active after voice has given up or a listening
+        // window ended. A blind
+        // pupil cannot find the buttons below, so without this the screen was a
+        // dead end. Child buttons keep their own taps; this catches empty space.
+        body: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _voiceGaveUp
+              ? () => unawaited(_restartVoice())
+              : (_nameRetryAvailable
+                  ? () => unawaited(_retryName())
+                  : (_confirmationRetryAvailable
+                      ? () => unawaited(_retryConfirmation())
+                      : null)),
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
                   const SizedBox(height: 12),
-                ],
-                if (_addingNew) ...[
-                  TextField(
-                    controller: _nameController,
-                    autofocus: true,
-                    textCapitalization: TextCapitalization.words,
-                    textInputAction: TextInputAction.done,
-                    onEditingComplete: () {
-                      FocusScope.of(context).unfocus();
-                      _submitTypedName();
-                    },
-                    decoration: const InputDecoration(
-                      labelText: 'Student name',
-                      hintText: 'Enter student name',
-                      border: OutlineInputBorder(),
-                    ),
-                    onSubmitted: (_) {
-                      FocusScope.of(context).unfocus();
-                      _submitTypedName();
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  Semantics(
-                    button: true,
-                    label: 'Start learning',
-                    onTapHint: 'save the name and start learning',
-                    onTap: _submitTypedName,
-                    excludeSemantics: true,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(56),
-                        backgroundColor: const Color(0xFF1A56DB),
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: _submitTypedName,
-                      child: const Text(
-                        'Start learning',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
+                  const Text(
+                    'Who is learning?',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 30,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A56DB),
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  Semantics(
-                    button: true,
-                    label: 'Close keyboard',
-                    onTap: () => FocusScope.of(context).unfocus(),
-                    excludeSemantics: true,
-                    child: TextButton.icon(
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size.fromHeight(48),
-                        foregroundColor: const Color(0xFF475569),
+                  const SizedBox(height: 16),
+                  if (_voiceGaveUp) ...[
+                    Semantics(
+                      button: true,
+                      label: 'Try voice again',
+                      onTap: () => unawaited(_restartVoice()),
+                      excludeSemantics: true,
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.mic_rounded),
+                        label: const Text('Try voice again'),
+                        onPressed: () => unawaited(_restartVoice()),
                       ),
-                      icon: const Icon(Icons.keyboard_hide_rounded),
-                      label: const Text('Close keyboard'),
-                      onPressed: () => FocusScope.of(context).unfocus(),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Semantics(
-                    button: true,
-                    label: 'Back to student list',
-                    excludeSemantics: true,
-                    onTap: () {
-                      FocusScope.of(context).unfocus();
-                      setState(() => _addingNew = false);
-                    },
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(48),
+                    const SizedBox(height: 12),
+                  ],
+                  if (_confirmationRetryAvailable) ...[
+                    Semantics(
+                      button: true,
+                      label: 'Repeat confirmation',
+                      onTapHint: 'hear the confirmation again',
+                      onTap: () => unawaited(_retryConfirmation()),
+                      excludeSemantics: true,
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: const Text('Repeat confirmation'),
+                        onPressed: () => unawaited(_retryConfirmation()),
                       ),
-                      onPressed: () {
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  if (_addingNew) ...[
+                    TextField(
+                      controller: _nameController,
+                      autofocus: true,
+                      textCapitalization: TextCapitalization.words,
+                      textInputAction: TextInputAction.done,
+                      onEditingComplete: () {
+                        FocusScope.of(context).unfocus();
+                        _submitTypedName();
+                      },
+                      decoration: const InputDecoration(
+                        labelText: 'Student name',
+                        hintText: 'Enter student name',
+                        border: OutlineInputBorder(),
+                      ),
+                      onSubmitted: (_) {
+                        FocusScope.of(context).unfocus();
+                        _submitTypedName();
+                      },
+                    ),
+                    if (AccessibilityMode.isScreenReaderActive &&
+                        _pendingName == null &&
+                        !_nameRetryAvailable) ...[
+                      const SizedBox(height: 10),
+                      Semantics(
+                        button: true,
+                        label: 'Say name after the tone',
+                        onTapHint: 'start voice name registration',
+                        onTap: () => unawaited(_promptName()),
+                        excludeSemantics: true,
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.mic_rounded),
+                          label: const Text('Say name after the tone'),
+                          onPressed: () => unawaited(_promptName()),
+                        ),
+                      ),
+                    ],
+                    if (_pendingName != null) ...[
+                      const SizedBox(height: 10),
+                      Semantics(
+                        button: true,
+                        label: 'Accept name ${_pendingName!}',
+                        onTapHint: 'use this recognized name',
+                        onTap: () => unawaited(_acceptPendingName()),
+                        excludeSemantics: true,
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.check_rounded),
+                          label: Text('Accept name ${_pendingName!}'),
+                          onPressed: () => unawaited(_acceptPendingName()),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Semantics(
+                        button: true,
+                        label: 'Try again',
+                        onTapHint: 'discard this name and speak again',
+                        onTap: () => unawaited(_retryName()),
+                        excludeSemantics: true,
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('Try again'),
+                          onPressed: () => unawaited(_retryName()),
+                        ),
+                      ),
+                    ],
+                    if (_nameRetryAvailable) ...[
+                      const SizedBox(height: 10),
+                      Semantics(
+                        button: true,
+                        label: 'Try again',
+                        onTapHint: 'repeat voice name registration',
+                        onTap: () => unawaited(_retryName()),
+                        excludeSemantics: true,
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('Try again'),
+                          onPressed: () => unawaited(_retryName()),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    Semantics(
+                      button: true,
+                      label: 'Start learning',
+                      onTapHint: 'save the name and start learning',
+                      onTap: _submitTypedName,
+                      excludeSemantics: true,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(56),
+                          backgroundColor: const Color(0xFF1A56DB),
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: _submitTypedName,
+                        child: const Text(
+                          'Start learning',
+                          style: TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Semantics(
+                      button: true,
+                      label: 'Close keyboard',
+                      onTap: () => FocusScope.of(context).unfocus(),
+                      excludeSemantics: true,
+                      child: TextButton.icon(
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size.fromHeight(48),
+                          foregroundColor: const Color(0xFF475569),
+                        ),
+                        icon: const Icon(Icons.keyboard_hide_rounded),
+                        label: const Text('Close keyboard'),
+                        onPressed: () => FocusScope.of(context).unfocus(),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Semantics(
+                      button: true,
+                      label: 'Back to student list',
+                      excludeSemantics: true,
+                      onTap: () {
                         FocusScope.of(context).unfocus();
                         setState(() => _addingNew = false);
                       },
-                      child: const Text('Back to student list'),
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(48),
+                        ),
+                        onPressed: () {
+                          FocusScope.of(context).unfocus();
+                          setState(() => _addingNew = false);
+                        },
+                        child: const Text('Back to student list'),
+                      ),
                     ),
-                  ),
-                ] else ...[
-                  Expanded(
-                    child: ListView(
-                      children: [
-                        for (final s in _students)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 6),
-                            child: Semantics(
-                              button: true,
-                              label: s.name,
-                              onTapHint: 'continue as ${s.name}',
-                              onTap: () => _login(s),
-                              excludeSemantics: true,
-                              child: ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  padding: const EdgeInsets.all(20),
-                                  textStyle: const TextStyle(fontSize: 22),
+                  ] else ...[
+                    Expanded(
+                      child: ListView(
+                        children: [
+                          for (final s in _students)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              child: Semantics(
+                                button: true,
+                                label: s.name,
+                                onTapHint: 'continue as ${s.name}',
+                                onTap: () => _login(s),
+                                excludeSemantics: true,
+                                child: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    padding: const EdgeInsets.all(20),
+                                    textStyle: const TextStyle(fontSize: 22),
+                                  ),
+                                  onPressed: () => _login(s),
+                                  child: Text(s.name),
                                 ),
-                                onPressed: () => _login(s),
-                                child: Text(s.name),
                               ),
                             ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  Semantics(
-                    button: true,
-                    label: 'New student',
-                    onTapHint: 'type a new student name',
-                    onTap: () => setState(() => _addingNew = true),
-                    excludeSemantics: true,
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(56),
-                        padding: const EdgeInsets.all(16),
-                        textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                        ],
                       ),
-                      icon: const Icon(Icons.add_rounded, size: 24),
-                      label: const Text('New student'),
-                      onPressed: () => setState(() => _addingNew = true),
                     ),
-                  ),
+                    Semantics(
+                      button: true,
+                      label: 'New student',
+                      onTapHint: 'type a new student name',
+                      onTap: () => setState(() => _addingNew = true),
+                      excludeSemantics: true,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(56),
+                          padding: const EdgeInsets.all(16),
+                          textStyle: const TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.w700),
+                        ),
+                        icon: const Icon(Icons.add_rounded, size: 24),
+                        label: const Text('New student'),
+                        onPressed: () => setState(() => _addingNew = true),
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),
       ),
-    ),
     );
   }
 
