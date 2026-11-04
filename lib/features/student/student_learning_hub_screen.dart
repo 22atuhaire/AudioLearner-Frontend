@@ -415,6 +415,93 @@ class _StudentLearningHubScreenState
     }
   }
 
+  /// Performs an explicit network refresh for students using TalkBack. The
+  /// normal cloud bridge remains background/offline-first; this action gives a
+  /// student a reliable way to check for a teacher's newly uploaded subjects.
+  Future<void> _refreshSubjectsFromNetwork() async {
+    if (!mounted || _cloudSyncing) {
+      if (mounted && _cloudSyncing) {
+        AccessibilityMode.announce('Subjects are already being refreshed.');
+      }
+      return;
+    }
+
+    final student = _currentStudent ?? await _activeStudent();
+    if (!mounted) return;
+    if (student == null) {
+      AccessibilityMode.announce(
+          'I could not find the active student account.');
+      return;
+    }
+
+    final link = await _link.getStudentLink(student.id);
+    if (!mounted) return;
+    if (link == null) {
+      AccessibilityMode.announce(
+        'This student is not linked to a class yet. Join a class first, '
+        'then refresh subjects.',
+      );
+      return;
+    }
+
+    final before = _subjects().length;
+    setState(() => _cloudSyncing = true);
+    AccessibilityMode.announce('Checking for new subjects online.');
+
+    var refreshSucceeded = true;
+    var addedLessons = 0;
+    try {
+      addedLessons = await _link
+          .syncCloudContentForStudent(
+            localStudentId: student.id,
+            db: ref.read(appDatabaseProvider),
+          )
+          .timeout(const Duration(seconds: 30));
+    } catch (_) {
+      refreshSucceeded = false;
+    }
+
+    if (!mounted) return;
+    setState(() => _cloudSyncing = false);
+    if (!refreshSucceeded) {
+      AccessibilityMode.announce(
+        'I could not refresh subjects. Check the internet connection and '
+        'try again.',
+      );
+      return;
+    }
+
+    ref.invalidate(allSubjectsProvider);
+    try {
+      await ref.read(allSubjectsProvider.future);
+    } catch (_) {
+      if (!mounted) return;
+      AccessibilityMode.announce(
+        'Subjects could not be loaded from this phone.',
+      );
+      return;
+    }
+    if (!mounted) return;
+
+    final after = _subjects().length;
+    if (after > before || addedLessons > 0) {
+      AccessibilityMode.announce(
+        'New subjects are available. $after subject${after == 1 ? '' : 's'} '
+        'are ready.',
+      );
+    } else if (after > 0) {
+      AccessibilityMode.announce(
+        'No new subjects were found. You have $after subject'
+        '${after == 1 ? '' : 's'} on this phone.',
+      );
+    } else {
+      AccessibilityMode.announce(
+        'No subjects were found. Ask your teacher to upload a subject, '
+        'then refresh again.',
+      );
+    }
+  }
+
   /// Entry point for the voice-guided "join your class" flow, surfaced as a
   /// header icon so a student is never stuck without a class code prompt.
   Future<void> _openJoinClassFlow() async {
@@ -3626,6 +3713,12 @@ class _StudentLearningHubScreenState
 
     switch (_stage) {
       case LearningStage.subjects:
+        add(
+          'Refresh subjects',
+          'check the internet for subjects uploaded by your teacher',
+          Icons.refresh_rounded,
+          () => unawaited(_refreshSubjectsFromNetwork()),
+        );
         add('Previous subject', 'move to the previous subject',
             Icons.chevron_left_rounded, _onSwipeLeft);
         add('Next subject', 'move to the next subject',
