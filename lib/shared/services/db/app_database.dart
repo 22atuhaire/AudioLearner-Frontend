@@ -380,6 +380,14 @@ class LessonDao extends DatabaseAccessor<AppDatabase> with _$LessonDaoMixin {
   Future<List<Lesson>> getLessonsByTopicId(int topicId) =>
       (select(lessonsTable)..where((t) => t.topicId.equals(topicId))).get();
 
+  /// Return the lesson with the given [id], or `null` if it is absent.
+  Future<Lesson?> getLessonById(int id) =>
+      (select(lessonsTable)..where((t) => t.id.equals(id))).getSingleOrNull();
+
+  /// Delete a lesson after its questions have been removed.
+  Future<int> deleteLesson(int id) =>
+      (delete(lessonsTable)..where((t) => t.id.equals(id))).go();
+
   /// Persist the local file-system [path] for the cached audio of a lesson.
   Future<bool> updateAudioFilePath(int id, String path) async {
     final rowsAffected = await (update(lessonsTable)

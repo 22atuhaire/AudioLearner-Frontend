@@ -427,9 +427,8 @@ class BackendApiService {
     if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
       raw = 'https://$raw';
     }
-    final normalized = raw.endsWith('/')
-        ? raw.substring(0, raw.length - 1)
-        : raw;
+    final normalized =
+        raw.endsWith('/') ? raw.substring(0, raw.length - 1) : raw;
     final parsed = Uri.parse('$normalized$path');
     return parsed.replace(
       host: parsed.host.toLowerCase(),
@@ -550,7 +549,8 @@ class BackendApiService {
         path: '/',
       ).timeout(const Duration(seconds: 75));
       final awake = _isSuccess(statusCode);
-      debugPrint('[BackendApiService] Warm-up finished (status: $statusCode, awake: $awake)');
+      debugPrint(
+          '[BackendApiService] Warm-up finished (status: $statusCode, awake: $awake)');
       return awake;
     } catch (e) {
       debugPrint('[BackendApiService] Warm-up error: $e');
@@ -1456,6 +1456,26 @@ class BackendApiService {
       );
     }
     return BackendNote.fromJson(data);
+  }
+
+  /// Soft-deletes a note for the authenticated teacher.
+  Future<void> deleteNote({
+    required String baseUrl,
+    required String accessToken,
+    required String noteId,
+  }) async {
+    final (statusCode, data) = await _sendJson(
+      method: 'DELETE',
+      baseUrl: baseUrl,
+      path: '/api/v1/notes/$noteId',
+      accessToken: accessToken,
+    );
+    if (statusCode != 204 && statusCode != 404) {
+      throw BackendApiException(
+        _extractDetail(data, 'Could not delete the lesson note.'),
+        statusCode: statusCode,
+      );
+    }
   }
 
   /// Lists notes visible to the current account (newest first, per backend).

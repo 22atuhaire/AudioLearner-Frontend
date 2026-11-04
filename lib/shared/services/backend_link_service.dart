@@ -832,6 +832,47 @@ class BackendLinkService {
     await _writeMap(_kNoteMap, map);
   }
 
+  Future<void> _removeRemoteNoteId(int localLessonId) async {
+    final map = await _readMap(_kNoteMap);
+    map.remove('$localLessonId');
+    await _writeMap(_kNoteMap, map);
+  }
+
+  Future<void> _removeRemoteUnitId(int localLessonId) async {
+    final map = await _readMap(_kUnitMap);
+    map.remove('$localLessonId');
+    await _writeMap(_kUnitMap, map);
+  }
+
+  /// Deletes the cloud copy of a teacher's lesson, if this local lesson has
+  /// already been uploaded. A missing remote note is treated as success so a
+  /// retry after a completed server delete remains safe.
+  Future<void> deleteTeacherLesson({
+    required int localTeacherId,
+    required int localLessonId,
+  }) async {
+    final remoteNoteId = await getRemoteNoteId(localLessonId);
+    if (remoteNoteId == null || remoteNoteId.isEmpty) return;
+
+    final link = await getTeacherLink(localTeacherId);
+    if (link == null) {
+      throw BackendApiException('This teacher is not connected to the server.');
+    }
+    final token = await ensureTeacherToken(localTeacherId);
+    if (token == null) {
+      throw BackendApiException(
+          'Your teacher session has expired. Please sign in again.');
+    }
+
+    await _api.deleteNote(
+      baseUrl: link.baseUrl,
+      accessToken: token,
+      noteId: remoteNoteId,
+    );
+    await _removeRemoteNoteId(localLessonId);
+    await _removeRemoteUnitId(localLessonId);
+  }
+
   Future<String?> getRemoteUnitId(int localLessonId) async {
     final map = await _readMap(_kUnitMap);
     return map['$localLessonId']?.toString();
@@ -1073,11 +1114,49 @@ class BackendLinkService {
     if (token == null) return 0;
 
     try {
-      final notes =
-          await _api.listNotes(baseUrl: link.baseUrl, accessToken: token);
-      if (notes.isEmpty) return 0;
-
+      const notesPageSize = 100;
+      final notes = await _api.listNotes(
+        baseUrl: link.baseUrl,
+        accessToken: token,
+        limit: notesPageSize,
+      );
       final syncedMap = await _readMap(_kCloudNoteMap);
+      final visibleRemoteIds = notes.map((note) => note.id).toSet();
+      // Only reconcile absence when the complete first page was returned.
+      // Otherwise an older note may simply be on a later page.
+      final deletedRemoteIds = notes.length < notesPageSize
+          ? syncedMap.keys
+              .where((remoteId) => !visibleRemoteIds.contains(remoteId))
+              .toList()
+          : const <String>[];
+      for (final remoteId in deletedRemoteIds) {
+        final localLessonId =
+            int.tryParse(syncedMap[remoteId]?.toString() ?? '');
+        if (localLessonId == null) {
+          syncedMap.remove(remoteId);
+          continue;
+        }
+        await db.questionDao.deleteQuestionsByLessonId(localLessonId);
+        final lesson = await db.lessonDao.getLessonById(localLessonId);
+        if (lesson != null) {
+          await db.lessonDao.deleteLesson(localLessonId);
+          final remaining =
+              await db.lessonDao.getLessonsByTopicId(lesson.topicId);
+          if (remaining.isEmpty) {
+            await db.topicDao.deleteTopic(lesson.topicId);
+          }
+        }
+        await _removeRemoteNoteId(localLessonId);
+        await _removeRemoteUnitId(localLessonId);
+        syncedMap.remove(remoteId);
+      }
+      if (notes.isEmpty) {
+        if (deletedRemoteIds.isNotEmpty) {
+          await _writeMap(_kCloudNoteMap, syncedMap);
+        }
+        return 0;
+      }
+
       final placeholderTeacherId = await _ensureCloudPlaceholderTeacher(db);
       var added = 0;
       var createdAtCursor = DateTime.now().millisecondsSinceEpoch;
@@ -1226,7 +1305,7 @@ class BackendLinkService {
         added += 1;
       }
 
-      if (added > 0) {
+      if (added > 0 || deletedRemoteIds.isNotEmpty) {
         await _writeMap(_kCloudNoteMap, syncedMap);
       }
       return added;

@@ -152,9 +152,40 @@ class _TeacherSubjectScreenState extends ConsumerState<TeacherSubjectScreen> {
               foregroundColor: Colors.white,
             ),
             onPressed: () async {
-              final db = ref.read(appDatabaseProvider);
-              await db.topicDao.deleteTopic(topic.id);
-              if (ctx.mounted) Navigator.pop(ctx, true);
+              try {
+                final db = ref.read(appDatabaseProvider);
+                final teacher = ref.read(currentTeacherProvider);
+                final lessons =
+                    await db.lessonDao.getLessonsByTopicId(topic.id);
+
+                if (teacher != null) {
+                  final link = ref.read(backendLinkServiceProvider);
+                  for (final lesson in lessons) {
+                    await link.deleteTeacherLesson(
+                      localTeacherId: teacher.id,
+                      localLessonId: lesson.id,
+                    );
+                  }
+                }
+
+                await db.transaction(() async {
+                  for (final lesson in lessons) {
+                    await db.questionDao.deleteQuestionsByLessonId(lesson.id);
+                    await db.lessonDao.deleteLesson(lesson.id);
+                  }
+                  await db.topicDao.deleteTopic(topic.id);
+                });
+                if (ctx.mounted) Navigator.pop(ctx, true);
+              } catch (e) {
+                if (!ctx.mounted) return;
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      e.toString().replaceFirst('BackendApiException: ', ''),
+                    ),
+                  ),
+                );
+              }
             },
             child: const Text('Delete'),
           ),
@@ -231,8 +262,7 @@ class _AddTopicDialogState extends ConsumerState<_AddTopicDialog> {
       ),
       actions: [
         TextButton(
-          onPressed:
-              _saving ? null : () => Navigator.pop(context, false),
+          onPressed: _saving ? null : () => Navigator.pop(context, false),
           child: const Text('Cancel'),
         ),
         ElevatedButton(
