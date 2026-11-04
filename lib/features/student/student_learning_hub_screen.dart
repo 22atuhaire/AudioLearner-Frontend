@@ -373,15 +373,19 @@ class _StudentLearningHubScreenState
       if (!mounted) return;
       setState(() => _cloudSyncing = false);
 
+      // The sync also refreshes approved questions for lessons that were
+      // downloaded earlier. That path returns zero new lessons, but it can
+      // turn a previously hidden subject into a student-visible one.
+      ref.invalidate(allSubjectsProvider);
+      try {
+        await ref.read(allSubjectsProvider.future);
+      } catch (_) {}
+      if (!mounted) return;
+
       if (added > 0) {
-        ref.invalidate(allSubjectsProvider);
         // Wait for the refreshed list, then re-announce so the student hears
         // the now-available subjects (and we never leave a stale "No subjects
         // available" spoken earlier).
-        try {
-          await ref.read(allSubjectsProvider.future);
-        } catch (_) {}
-        if (!mounted) return;
         _announceNewLessons(added);
       } else if (mounted) {
         // A newly uploaded note may still be processing on the backend when
@@ -402,7 +406,9 @@ class _StudentLearningHubScreenState
               .timeout(const Duration(seconds: 25), onTimeout: () => 0);
           if (retryAdded > 0) {
             ref.invalidate(allSubjectsProvider);
-            await ref.read(allSubjectsProvider.future);
+            try {
+              await ref.read(allSubjectsProvider.future);
+            } catch (_) {}
             if (!mounted) return;
             _announceNewLessons(retryAdded);
             break;
