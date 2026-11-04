@@ -4,7 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:drift/drift.dart' show Value;
 import 'package:audioapp/shared/services/providers.dart';
 import 'package:audioapp/shared/services/db/app_database.dart';
-import 'package:audioapp/features/teacher/teacher_pin_screen.dart' show showTeacherLinkDialog;
+import 'package:audioapp/features/teacher/teacher_pin_screen.dart'
+    show showTeacherLinkDialog;
 // PinService is accessed through pinServiceProvider; no direct import needed.
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -213,13 +214,23 @@ class _TeacherDashboardScreenState
               final teacher = ref.read(currentTeacherProvider)!;
               final db = ref.read(appDatabaseProvider);
 
-              await db.subjectDao.insertSubject(
+              final localSubjectId = await db.subjectDao.insertSubject(
                 SubjectsTableCompanion(
                   teacherId: Value(teacher.id),
                   name: Value(name),
                   createdAt: Value(DateTime.now().millisecondsSinceEpoch),
                 ),
               );
+              try {
+                await ref.read(backendLinkServiceProvider).syncTeacherSubject(
+                      localTeacherId: teacher.id,
+                      localSubjectId: localSubjectId,
+                      subjectName: name,
+                    );
+              } catch (_) {
+                // Keep the local subject; the next upload reports if cloud
+                // subject synchronization is unavailable.
+              }
 
               ref.invalidate(teacherSubjectsProvider);
 

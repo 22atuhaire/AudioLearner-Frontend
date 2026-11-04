@@ -193,6 +193,7 @@ class BackendLinkService {
 
   static const _kTeacherLinkPrefix = 'backend_link_teacher_';
   static const _kStudentLinkPrefix = 'backend_link_student_';
+  static const _kPendingStudentPrefix = 'backend_pending_student_';
   static const _kSignedInTeacher = 'signed_in_teacher_id';
   static const _kSubjectMap =
       'backend_map_subject'; // local subject id -> remote subject id
@@ -719,8 +720,23 @@ class BackendLinkService {
     required String fullName,
     required String studentCode,
   }) async {
-    final email = _generateStudentEmail(localStudentId);
-    final password = _generateStrongPassword();
+    final pendingKey = '$_kPendingStudentPrefix$localStudentId';
+    String email;
+    String password;
+    final pending = await _readLinkJson(pendingKey);
+    if (pending != null) {
+      final values = jsonDecode(pending) as Map<String, dynamic>;
+      email =
+          values['email']?.toString() ?? _generateStudentEmail(localStudentId);
+      password = values['password']?.toString() ?? _generateStrongPassword();
+    } else {
+      email = _generateStudentEmail(localStudentId);
+      password = _generateStrongPassword();
+      await _writeLinkJson(
+        pendingKey,
+        jsonEncode({'email': email, 'password': password}),
+      );
+    }
 
     final result = await _api.registerStudent(
       baseUrl: baseUrl,
@@ -747,6 +763,7 @@ class BackendLinkService {
       remoteStudentId: result.userId,
     );
     await _saveStudentLink(localStudentId, info);
+    await _deleteLinkJson(pendingKey);
     return info;
   }
 
@@ -819,6 +836,28 @@ class BackendLinkService {
     final map = await _readMap(_kSubjectMap);
     map['$localSubjectId'] = remoteId;
     await _writeMap(_kSubjectMap, map);
+  }
+
+  /// Creates or resolves a newly added local teacher subject in the linked
+  /// backend class, then stores the local-to-remote mapping for uploads.
+  Future<String?> syncTeacherSubject({
+    required int localTeacherId,
+    required int localSubjectId,
+    required String subjectName,
+  }) async {
+    final link = await getTeacherLink(localTeacherId);
+    if (link?.classId == null || link!.classId!.isEmpty) return null;
+    final token = await ensureTeacherToken(localTeacherId);
+    if (token == null) return null;
+    final remoteId = await _api.addSubjectToClass(
+      baseUrl: link.baseUrl,
+      accessToken: token,
+      classId: link.classId!,
+      subjectName: subjectName,
+    );
+    if (remoteId.isEmpty) return null;
+    await setRemoteSubjectId(localSubjectId, remoteId);
+    return remoteId;
   }
 
   Future<String?> getRemoteNoteId(int localLessonId) async {
@@ -912,13 +951,14 @@ class BackendLinkService {
     required String title,
     required String gradeLevel,
     required String lessonText,
+    String? subjectId,
     List<AiGeneratedQuestion> questions = const [],
   }) async {
     try {
       final link = await getTeacherLink(localTeacherId);
       if (link == null) return null;
-      final subjectId = link.subjectId;
-      if (subjectId == null || subjectId.isEmpty) return null;
+      final remoteSubjectId = subjectId ?? link.subjectId;
+      if (remoteSubjectId == null || remoteSubjectId.isEmpty) return null;
 
       final token = await ensureTeacherToken(localTeacherId);
       if (token == null) return null;
@@ -927,7 +967,7 @@ class BackendLinkService {
         baseUrl: link.baseUrl,
         accessToken: token,
         title: title.trim().isEmpty ? 'Lesson' : title.trim(),
-        subjectId: subjectId,
+        subjectId: remoteSubjectId,
         gradeLevel: gradeLevel.trim().isEmpty ? 'General' : gradeLevel.trim(),
         description: lessonText,
       );

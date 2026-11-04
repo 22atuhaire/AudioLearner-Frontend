@@ -490,6 +490,11 @@ class _TeacherUploadScreenState extends ConsumerState<TeacherUploadScreen> {
         final title = (topic != null && topic.name.trim().isNotEmpty)
             ? topic.name.trim()
             : (_fileName ?? 'Lesson');
+        final remoteSubjectId = topic == null
+            ? null
+            : await ref
+                .read(backendLinkServiceProvider)
+                .getRemoteSubjectId(topic.subjectId);
         remoteNoteId =
             await ref.read(backendLinkServiceProvider).uploadTeacherNote(
                   localTeacherId: teacher.id,
@@ -497,6 +502,7 @@ class _TeacherUploadScreenState extends ConsumerState<TeacherUploadScreen> {
                   title: title,
                   gradeLevel: 'General',
                   lessonText: _extractedText,
+                  subjectId: remoteSubjectId,
                   // Same questions the students will hear — pushed as unapproved
                   // review items so the teacher can vet them from any device.
                   questions: aiQuestions,

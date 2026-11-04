@@ -137,7 +137,7 @@ class _TeacherPinScreenState extends ConsumerState<TeacherPinScreen> {
           createdAt: Value(now),
         ),
       );
-      await db.subjectDao.insertSubject(
+      final localSubjectId = await db.subjectDao.insertSubject(
         SubjectsTableCompanion(
           teacherId: Value(teacherId),
           name: Value(subject),
@@ -147,7 +147,7 @@ class _TeacherPinScreenState extends ConsumerState<TeacherPinScreen> {
 
       // Create the cloud account (class teacher) + class + sharable codes,
       // and the subject they teach inside that class.
-      await link.linkTeacherAccount(
+      final teacherLink = await link.linkTeacherAccount(
         localTeacherId: teacherId,
         baseUrl: _baseUrl,
         fullName: name,
@@ -157,6 +157,9 @@ class _TeacherPinScreenState extends ConsumerState<TeacherPinScreen> {
         className: _joinExistingMode ? null : className,
         joinTeacherCode: _joinExistingMode ? teacherCode : null,
       );
+      if (teacherLink.subjectId != null && teacherLink.subjectId!.isNotEmpty) {
+        await link.setRemoteSubjectId(localSubjectId, teacherLink.subjectId!);
+      }
       await link.setSignedInTeacher(teacherId);
 
       final teacher = await db.teacherDao.getTeacherById(teacherId);
@@ -171,7 +174,8 @@ class _TeacherPinScreenState extends ConsumerState<TeacherPinScreen> {
           e.statusCode == 409 ||
           msg.contains('already exists') ||
           msg.contains('registered')) {
-        _fail('${e.message} If you already have an account, switch to Sign in.');
+        _fail(
+            '${e.message} If you already have an account, switch to Sign in.');
       } else {
         _fail(e.message);
       }
