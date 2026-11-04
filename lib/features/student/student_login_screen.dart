@@ -165,6 +165,7 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
       session,
       (words) => _handleHeardName(words),
       onNothing: () => _offerNameRetry(session),
+      settleOnPartial: true,
     );
   }
 
@@ -353,11 +354,13 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
     int session,
     void Function(String) onResult, {
     required Future<void> Function() onNothing,
+    bool settleOnPartial = false,
     Duration listenFor = const Duration(seconds: 20),
     Duration pauseFor = const Duration(seconds: 6),
   }) async {
     var handled = false;
     var lastPartial = '';
+    Timer? partialSettleTimer;
     void deliver(String words) {
       // If everything heard was our own prompt echoing back, this yields an
       // empty string — each caller already treats that as "no answer"
@@ -372,11 +375,23 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
       // only partials. Keep the latest partial so we can still use it on done -
       // otherwise a clearly-spoken name is dropped and the prompt loops.
       onPartial: (words) {
-        if (words.trim().isNotEmpty) lastPartial = words.trim();
+        final partial = words.trim();
+        if (partial.isEmpty) return;
+        lastPartial = partial;
+        if (!settleOnPartial) return;
+        partialSettleTimer?.cancel();
+        partialSettleTimer = Timer(const Duration(milliseconds: 900), () {
+          if (handled || session != _session || !mounted) return;
+          handled = true;
+          partialSettleTimer = null;
+          unawaited(_stt.stopListening());
+          deliver(lastPartial);
+        });
       },
       onResult: (words) {
         if (handled || session != _session) return;
         handled = true;
+        partialSettleTimer?.cancel();
         _recognizerErrors = 0; // the engine is working again
         unawaited(_stt.stopListening());
         deliver(words);
@@ -384,6 +399,7 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
       onDone: () {
         if (handled || session != _session) return;
         handled = true;
+        partialSettleTimer?.cancel();
         if (lastPartial.isNotEmpty) {
           _recognizerErrors = 0;
           deliver(
@@ -398,6 +414,7 @@ class _StudentLoginScreenState extends ConsumerState<StudentLoginScreen> {
       onError: (message) {
         if (handled || session != _session) return;
         handled = true;
+        partialSettleTimer?.cancel();
         if (lastPartial.isNotEmpty) {
           _recognizerErrors = 0;
           deliver(lastPartial);

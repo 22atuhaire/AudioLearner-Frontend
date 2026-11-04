@@ -95,16 +95,15 @@ class AccessibilityMode {
   bool get shouldSpeakContent => true;
 
   static AccessibilityMode of(BuildContext context) => AccessibilityMode(
-        screenReaderEnabled: MediaQuery.maybeOf(context)?.accessibleNavigation ??
-            false,
+        screenReaderEnabled:
+            MediaQuery.maybeOf(context)?.accessibleNavigation ?? false,
       );
 
   /// Reads the flag without a [BuildContext] — usable from initState or a
   /// service. Prefer [of] inside build methods so the UI rebuilds when the
   /// student toggles TalkBack mid-session.
-  static bool get isScreenReaderActive =>
-      WidgetsBinding.instance.platformDispatcher.accessibilityFeatures
-          .accessibleNavigation;
+  static bool get isScreenReaderActive => WidgetsBinding
+      .instance.platformDispatcher.accessibilityFeatures.accessibleNavigation;
 
   /// Speaks [message] through the screen reader without moving focus.
   ///
@@ -211,7 +210,9 @@ class _AccessibilityFocusTargetState extends State<AccessibilityFocusTarget> {
     // post-frame callbacks run, so the node exists by the time focus is sent.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !AccessibilityMode.isScreenReaderActive) return;
-      context.findRenderObject()?.sendSemanticsEvent(const FocusSemanticEvent());
+      context
+          .findRenderObject()
+          ?.sendSemanticsEvent(const FocusSemanticEvent());
     });
   }
 
@@ -250,9 +251,13 @@ class AccessibleActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Semantics(
+      container: true,
       button: true,
       label: label,
-      onTapHint: hint,
+      // Keep the focused announcement short. TalkBack already supplies the
+      // standard double-tap activation instruction for a real button; adding
+      // a long custom hint made every swipe stop feel delayed.
+      onTapHint: 'activate',
       onTap: onPressed,
       child: ExcludeSemantics(
         child: Material(
@@ -263,8 +268,7 @@ class AccessibleActionButton extends StatelessWidget {
             onTap: onPressed,
             child: Container(
               constraints: const BoxConstraints(minHeight: 56, minWidth: 96),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
